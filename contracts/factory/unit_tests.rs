@@ -3,8 +3,9 @@ mod tests {
 
     use crate::TradingAccountFactory;
     use near_sdk::{
-        test_utils::{accounts, VMContextBuilder},
-        testing_env, AccountId, Gas, NearToken, Promise, PublicKey,
+        AccountId, Gas, NearToken, Promise, PublicKey,
+        test_utils::{VMContextBuilder, accounts},
+        testing_env,
     };
     use std::str::FromStr;
 
@@ -31,6 +32,7 @@ mod tests {
         testing_env!(context.build());
 
         let contract = TradingAccountFactory::new(
+            account.clone(),
             "testnet".to_string(),
             "EaFtguW8o7cna1k8EtD4SFfGNdivuCPhx2Qautn7J3Rz".to_string(),
         );
@@ -52,6 +54,7 @@ mod tests {
         testing_env!(context.build());
 
         let mut contract = TradingAccountFactory::new(
+            accounts(1),
             "testnet".to_string(),
             "EaFtguW8o7cna1k8EtD4SFfGNdivuCPhx2Qautn7J3Rz".to_string(),
         );
@@ -64,6 +67,7 @@ mod tests {
         testing_env!(context.build());
 
         let contract = TradingAccountFactory::new(
+            accounts(1),
             "testnet".to_string(),
             "EaFtguW8o7cna1k8EtD4SFfGNdivuCPhx2Qautn7J3Rz".to_string(),
         );
@@ -85,6 +89,7 @@ mod tests {
         testing_env!(context.build());
 
         let contract = TradingAccountFactory::new(
+            accounts(1),
             "mainnet".to_string(),
             "EaFtguW8o7cna1k8EtD4SFfGNdivuCPhx2Qautn7J3Rz".to_string(),
         );
@@ -107,6 +112,7 @@ mod tests {
         testing_env!(context.build());
 
         let mut contract = TradingAccountFactory::new(
+            accounts(1),
             "testnet".to_string(),
             "EaFtguW8o7cna1k8EtD4SFfGNdivuCPhx2Qautn7J3Rz".to_string(),
         );
@@ -123,6 +129,7 @@ mod tests {
         testing_env!(context.build());
 
         let mut contract = TradingAccountFactory::new(
+            accounts(1),
             "testnet".to_string(),
             "EaFtguW8o7cna1k8EtD4SFfGNdivuCPhx2Qautn7J3Rz".to_string(),
         );
@@ -142,6 +149,7 @@ mod tests {
         testing_env!(context.build());
 
         let mut contract = TradingAccountFactory::new(
+            accounts(1),
             "testnet".to_string(),
             "EaFtguW8o7cna1k8EtD4SFfGNdivuCPhx2Qautn7J3Rz".to_string(),
         );
@@ -161,6 +169,7 @@ mod tests {
         testing_env!(context.build());
 
         let mut contract = TradingAccountFactory::new(
+            accounts(2),
             "testnet".to_string(),
             "EaFtguW8o7cna1k8EtD4SFfGNdivuCPhx2Qautn7J3Rz".to_string(),
         );
@@ -179,6 +188,7 @@ mod tests {
         testing_env!(context.build());
 
         let contract = TradingAccountFactory::new(
+            accounts(1),
             "testnet".to_string(),
             "EaFtguW8o7cna1k8EtD4SFfGNdivuCPhx2Qautn7J3Rz".to_string(),
         );
@@ -198,6 +208,7 @@ mod tests {
         testing_env!(context.build());
 
         let mut contract = TradingAccountFactory::new(
+            accounts(1),
             "testnet".to_string(),
             "EaFtguW8o7cna1k8EtD4SFfGNdivuCPhx2Qautn7J3Rz".to_string(),
         );
@@ -215,6 +226,7 @@ mod tests {
         testing_env!(context.build());
 
         let contract = TradingAccountFactory::new(
+            accounts(1),
             "testnet".to_string(),
             "EaFtguW8o7cna1k8EtD4SFfGNdivuCPhx2Qautn7J3Rz".to_string(),
         );
@@ -246,6 +258,7 @@ mod tests {
         testing_env!(context.build());
 
         let contract = TradingAccountFactory::new(
+            accounts(1),
             "testnet".to_string(),
             "EaFtguW8o7cna1k8EtD4SFfGNdivuCPhx2Qautn7J3Rz".to_string(),
         );
@@ -277,6 +290,7 @@ mod tests {
         testing_env!(context.build());
 
         let contract = TradingAccountFactory::new(
+            accounts(1),
             "testnet".to_string(),
             "EaFtguW8o7cna1k8EtD4SFfGNdivuCPhx2Qautn7J3Rz".to_string(),
         );
@@ -304,6 +318,7 @@ mod tests {
         testing_env!(context.build());
 
         let contract = TradingAccountFactory::new(
+            accounts(1),
             "testnet".to_string(),
             "EaFtguW8o7cna1k8EtD4SFfGNdivuCPhx2Qautn7J3Rz".to_string(),
         );
@@ -320,6 +335,7 @@ mod tests {
         testing_env!(context.build());
 
         let contract = TradingAccountFactory::new(
+            accounts(1),
             "testnet".to_string(),
             "EaFtguW8o7cna1k8EtD4SFfGNdivuCPhx2Qautn7J3Rz".to_string(),
         );
@@ -340,6 +356,7 @@ mod tests {
         testing_env!(context.build());
 
         let contract = TradingAccountFactory::new(
+            accounts(1),
             "testnet".to_string(),
             "EaFtguW8o7cna1k8EtD4SFfGNdivuCPhx2Qautn7J3Rz".to_string(),
         );
@@ -360,6 +377,7 @@ mod tests {
         testing_env!(context.build());
 
         let contract = TradingAccountFactory::new(
+            accounts(1),
             "testnet".to_string(),
             "EaFtguW8o7cna1k8EtD4SFfGNdivuCPhx2Qautn7J3Rz".to_string(),
         );
@@ -390,6 +408,7 @@ mod tests {
         testing_env!(context.build());
 
         let contract = TradingAccountFactory::new(
+            accounts(1),
             "testnet".to_string(),
             "EaFtguW8o7cna1k8EtD4SFfGNdivuCPhx2Qautn7J3Rz".to_string(),
         );
