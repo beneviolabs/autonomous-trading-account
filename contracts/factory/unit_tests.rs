@@ -3,9 +3,8 @@ mod tests {
 
     use crate::TradingAccountFactory;
     use near_sdk::{
-        AccountId, Gas, NearToken, Promise, PublicKey,
-        test_utils::{VMContextBuilder, accounts},
-        testing_env,
+        test_utils::{accounts, VMContextBuilder},
+        testing_env, AccountId, Gas, NearToken, Promise, PublicKey,
     };
     use std::str::FromStr;
 
