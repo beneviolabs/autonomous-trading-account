@@ -54,10 +54,11 @@ RUSTFLAGS="-Z unstable-options" cargo +nightly near build non-reproducible-wasm 
 # Set variables
 # https://nearblocks.io/txns/FSP5xgN2dKg4dX64dMV3P92MnvhbRYPZHqZx2cdpvuUQ
 #near contract deploy-as-global use-file /Users/charles/.nearai/registry/charleslavon.near/ft-allowance/contracts/target/near/proxy_contract.wasm as-global-hash peerfolio.testnet network-config testnet sign-with-keychain send
-GLOBAL_PROXY_CODE_HASH="AYGEtDuRFvjJ4Zjkbeak8PugbZByWG3g1tgxhyHpg6BC"
+GLOBAL_PROXY_CODE_HASH="FTwNLjNXmku6hKVnXSP9Q9QmnwcTqzpG8dhFeoic5DsK"
 WASM_PATH="target/near/proxy_factory.wasm"
-FACTORY_ACCOUNT="auth-v1.peerfolio.$NETWORK"
-FACTORY_OWNER="peerfolio.$NETWORK"
+FACTORY_ACCOUNT="auth-v2.peerfolio.$NETWORK"
+FACTORY_OWNER="peerfolio.peerfolio.$NETWORK"
+ROOT_ACCOUNT="peerfolio.$NETWORK"
 
 
 # Verify WASM magic header after optimization
@@ -80,7 +81,7 @@ fi
 # Deploy factory
     echo "Deploying factory contract..."
 if ! near state "$FACTORY_ACCOUNT" &>/dev/null; then
-    near create-account "$FACTORY_ACCOUNT" --masterAccount "$FACTORY_OWNER" --initialBalance 1.5
+    near create-account "$FACTORY_ACCOUNT" --masterAccount "$ROOT_ACCOUNT" --initialBalance 4
 
     echo "Waiting 2 seconds for block finality before deploying..."
     sleep 2
@@ -89,7 +90,7 @@ if ! near state "$FACTORY_ACCOUNT" &>/dev/null; then
     "$FACTORY_ACCOUNT" \
     "$WASM_PATH" \
     --initFunction "new" \
-    --initArgs '{"network":"'"$NEAR_ENV"'", "global_proxy_base58_hash":"'"$GLOBAL_PROXY_CODE_HASH"'"}'
+    --initArgs '{"owner_id":"'"$FACTORY_OWNER"'", "network":"'"$NEAR_ENV"'", "global_proxy_base58_hash":"'"$GLOBAL_PROXY_CODE_HASH"'"}'
  else
     near deploy \
     "$FACTORY_ACCOUNT" \
