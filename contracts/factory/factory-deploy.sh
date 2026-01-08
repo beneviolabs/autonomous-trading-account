@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Usage: ./factory-deploy.sh [FACTORY_OWNER] [GLOBAL_PROXY_CODE_HASH]
+# Example: ./factory-deploy.sh dao.peerfolio.testnet FTwNLjNXmku6hKVnXSP9Q9QmnwcTqzpG8dhFeoic5DsK
+
 # Check required tools
 check_requirements() {
     # Check if NEAR CLI is installed
@@ -51,13 +54,30 @@ fi
 echo "Building contract..."
 RUSTFLAGS="-Z unstable-options" cargo +nightly near build non-reproducible-wasm --no-abi
 
+# Validate required arguments
+if [ -z "$1" ]; then
+    echo "Error: FACTORY_OWNER is required"
+    echo "Usage: ./factory-deploy.sh <FACTORY_OWNER> <GLOBAL_PROXY_CODE_HASH>"
+    echo "Example: ./factory-deploy.sh dao.peerfolio.testnet FTwNLjNXmku6hKVnXSP9Q9QmnwcTqzpG8dhFeoic5DsK"
+    exit 1
+fi
+
+if [ -z "$2" ]; then
+    echo "Error: GLOBAL_PROXY_CODE_HASH is required"
+    echo "Usage: ./factory-deploy.sh <FACTORY_OWNER> <GLOBAL_PROXY_CODE_HASH>"
+    echo "Example: ./factory-deploy.sh dao.peerfolio.testnet FTwNLjNXmku6hKVnXSP9Q9QmnwcTqzpG8dhFeoic5DsK"
+    exit 1
+fi
+
+FACTORY_OWNER="$1"
+GLOBAL_PROXY_CODE_HASH="$2"
+
+echo "Using FACTORY_OWNER: $FACTORY_OWNER"
+echo "Using GLOBAL_PROXY_CODE_HASH: $GLOBAL_PROXY_CODE_HASH"
+
 # Set variables
-# https://nearblocks.io/txns/FSP5xgN2dKg4dX64dMV3P92MnvhbRYPZHqZx2cdpvuUQ
-#near contract deploy-as-global use-file /Users/charles/.nearai/registry/charleslavon.near/ft-allowance/contracts/target/near/proxy_contract.wasm as-global-hash peerfolio.testnet network-config testnet sign-with-keychain send
-GLOBAL_PROXY_CODE_HASH="FTwNLjNXmku6hKVnXSP9Q9QmnwcTqzpG8dhFeoic5DsK"
 WASM_PATH="target/near/proxy_factory.wasm"
 FACTORY_ACCOUNT="auth-v2.peerfolio.$NETWORK"
-FACTORY_OWNER="peerfolio.peerfolio.$NETWORK"
 ROOT_ACCOUNT="peerfolio.$NETWORK"
 
 
