@@ -28,9 +28,17 @@ echo "Using FACTORY_OWNER: $FACTORY_OWNER"
 echo "Using GLOBAL_TRADING_ACCOUNT_BS58_HASH: $GLOBAL_TRADING_ACCOUNT_BS58_HASH"
 
 # Set variables
+
 WASM_PATH="target/near/proxy_factory.wasm"
-FACTORY_ACCOUNT="auth.peerfolio.$NETWORK"
-ROOT_ACCOUNT="peerfolio.$NETWORK"
+# Determine network suffix
+if [ "$NETWORK" = "mainnet" ]; then
+    NETWORK_SUFFIX="near"
+else
+    NETWORK_SUFFIX="testnet"
+fi
+
+FACTORY_ACCOUNT="auth.peerfolio.$NETWORK_SUFFIX"
+ROOT_ACCOUNT="peerfolio.$NETWORK_SUFFIX"
 
 # Check if WASM file exists
 if [ ! -f "$WASM_PATH" ]; then
