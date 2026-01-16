@@ -119,6 +119,18 @@ impl TradingAccountContract {
         self.owner_id.clone()
     }
 
+    pub fn get_signer_id(&self) -> AccountId {
+        self.signer_id.clone()
+    }
+
+    pub fn set_signer_id(&mut self, signer_id: AccountId) {
+        assert!(
+            self.is_authorized(env::predecessor_account_id()),
+            "Unauthorized: only authorized users can set signer ID"
+        );
+        self.signer_id = signer_id;
+    }
+
     // Helper methods
     fn assert_owner(&self) {
         assert_eq!(

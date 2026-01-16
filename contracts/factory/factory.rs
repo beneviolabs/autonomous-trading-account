@@ -1,7 +1,7 @@
 use bs58;
 use near_sdk::serde::Serialize;
 use near_sdk::{
-    AccountId, Gas, NearToken, PanicOnDefault, Promise, PromiseError, PublicKey, env, near,
+    env, near, AccountId, Gas, NearToken, PanicOnDefault, Promise, PromiseError, PublicKey,
 };
 
 const TESTNET_SIGNER: &str = "v1.signer-prod.testnet";
@@ -20,7 +20,7 @@ pub struct TradingAccountFactory {
 #[near]
 impl TradingAccountFactory {
     #[init]
-    pub fn new(network: String, global_proxy_base58_hash: String) -> Self {
+    pub fn new(owner_id: AccountId, network: String, global_proxy_base58_hash: String) -> Self {
         assert!(!env::state_exists(), "Already initialized");
 
         let signer_contract = match network.as_str() {
@@ -33,7 +33,7 @@ impl TradingAccountFactory {
         Self {
             signer_contract,
             global_proxy_base58_hash: Self::decode_code_hash(&global_proxy_base58_hash),
-            owner_id: env::predecessor_account_id(),
+            owner_id,
         }
     }
 
