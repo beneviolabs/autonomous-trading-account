@@ -51,7 +51,7 @@ if ! near state "$FACTORY_ACCOUNT" &>/dev/null; then
     "$FACTORY_ACCOUNT" \
     "$WASM_PATH" \
     --initFunction "new" \
-    --initArgs '{"owner_id":"'"$FACTORY_OWNER"'", "network":"'"$NEAR_ENV"'", "global_proxy_base58_hash":"'"$GLOBAL_PROXY_CODE_HASH"'"}'
+    --initArgs '{"owner_id":"'"$FACTORY_OWNER"'", "network":"'"$NETWORK"'", "global_proxy_base58_hash":"'"$GLOBAL_PROXY_CODE_HASH"'"}'
  else
     near deploy \
     "$FACTORY_ACCOUNT" \
@@ -90,13 +90,4 @@ if [ "$WASM_CHECKSUM" != "$DEPLOYED_HASH" ]; then
     exit 1
 else
     echo "✅ Checksum match confirmed"
-fi
-
-
-# Check deployment status
-if [ $? -eq 0 ]; then
-    echo "Factory Contract updated successfully at $FACTORY_ACCOUNT"
-else
-    echo "Factory Contract deployment failed"
-    exit 1
 fi
