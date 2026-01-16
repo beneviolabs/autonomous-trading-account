@@ -77,7 +77,7 @@ echo "Using GLOBAL_PROXY_CODE_HASH: $GLOBAL_PROXY_CODE_HASH"
 
 # Set variables
 WASM_PATH="target/near/proxy_factory.wasm"
-FACTORY_ACCOUNT="auth-v2.peerfolio.$NETWORK"
+FACTORY_ACCOUNT="auth.peerfolio.$NETWORK"
 ROOT_ACCOUNT="peerfolio.$NETWORK"
 
 
