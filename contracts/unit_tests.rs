@@ -758,4 +758,59 @@ mod tests {
         );
         assert_eq!(result, expected);
     }
+
+    #[test]
+    fn test_set_signer_id_owner() {
+        let context = get_context(accounts(1));
+        testing_env!(context.build());
+        let mut contract = TradingAccountContract::new(
+            accounts(1),
+            AccountId::try_from("v1.signer-prod.testnet".to_string()).unwrap(),
+        );
+
+        let new_signer_id = AccountId::try_from("new-signer.near".to_string()).unwrap();
+        contract.set_signer_id(new_signer_id.clone());
+
+        assert_eq!(contract.get_signer_id(), new_signer_id);
+    }
+
+    #[test]
+    fn test_set_signer_id_authorized_user() {
+        let context = get_context(accounts(1));
+        testing_env!(context.build());
+        let mut contract = TradingAccountContract::new(
+            accounts(1),
+            AccountId::try_from("v1.signer-prod.testnet".to_string()).unwrap(),
+        );
+
+        // Add accounts(2) as authorized user
+        contract.add_authorized_user(accounts(2));
+
+        // Switch to accounts(2) context
+        let context = get_context(accounts(2));
+        testing_env!(context.build());
+
+        let new_signer_id = AccountId::try_from("new-signer.near".to_string()).unwrap();
+        contract.set_signer_id(new_signer_id.clone());
+
+        assert_eq!(contract.get_signer_id(), new_signer_id);
+    }
+
+    #[test]
+    #[should_panic(expected = "Unauthorized: only authorized users can set signer ID")]
+    fn test_set_signer_id_unauthorized() {
+        let context = get_context(accounts(1));
+        testing_env!(context.build());
+        let mut contract = TradingAccountContract::new(
+            accounts(1),
+            AccountId::try_from("v1.signer-prod.testnet".to_string()).unwrap(),
+        );
+
+        // Switch to unauthorized user (accounts(3))
+        let context = get_context(accounts(3));
+        testing_env!(context.build());
+
+        let new_signer_id = AccountId::try_from("new-signer.near".to_string()).unwrap();
+        contract.set_signer_id(new_signer_id);
+    }
 }
