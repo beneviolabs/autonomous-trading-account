@@ -42,7 +42,7 @@ fi
 # Deploy factory
     echo "Deploying factory contract..."
 if ! near state "$FACTORY_ACCOUNT" &>/dev/null; then
-    near create-account "$FACTORY_ACCOUNT" --masterAccount "$ROOT_ACCOUNT" --initialBalance 4
+    near create-account "$FACTORY_ACCOUNT" --masterAccount "$ROOT_ACCOUNT" --initialBalance 4 --networkId "$NETWORK"
 
     echo "Waiting 2 seconds for block finality before deploying..."
     sleep 2
@@ -51,11 +51,13 @@ if ! near state "$FACTORY_ACCOUNT" &>/dev/null; then
     "$FACTORY_ACCOUNT" \
     "$WASM_PATH" \
     --initFunction "new" \
+    --networkId "$NETWORK" \
     --initArgs '{"owner_id":"'"$FACTORY_OWNER"'", "network":"'"$NETWORK"'", "global_proxy_base58_hash":"'"$GLOBAL_TRADING_ACCOUNT_BS58_HASH"'"}'
  else
     near deploy \
     "$FACTORY_ACCOUNT" \
-    "$WASM_PATH"
+    "$WASM_PATH" \
+    --networkId "$NETWORK"
 fi
 
 
