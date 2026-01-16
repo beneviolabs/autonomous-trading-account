@@ -1,31 +1,31 @@
 #!/bin/bash
 
-# Usage: ./deploy-factory.sh [FACTORY_OWNER] [GLOBAL_PROXY_CODE_HASH] [NETWORK]
+# Usage: ./deploy-factory.sh [FACTORY_OWNER] [GLOBAL_TRADING_ACCOUNT_BS58_HASH] [NETWORK]
 # Example: ./deploy-factory.sh testnet dao.peerfolio.testnet FTwNLjNXmku6hKVnXSP9Q9QmnwcTqzpG8dhFeoic5DsK
 
 
 # Validate required arguments
 if [ -z "$1" ]; then
     echo "Error: FACTORY_OWNER is required"
-    echo "Usage: ./deploy-factory.sh <FACTORY_OWNER> <GLOBAL_PROXY_CODE_HASH> <NETWORK> "
+    echo "Usage: ./deploy-factory.sh <FACTORY_OWNER> <GLOBAL_TRADING_ACCOUNT_BS58_HASH> <NETWORK> "
     echo "Example: ./deploy-factory.sh dao.peerfolio.testnet FTwNLjNXmku6hKVnXSP9Q9QmnwcTqzpG8dhFeoic5DsK"
     exit 1
 fi
 
 if [ -z "$2" ]; then
-    echo "Error: GLOBAL_PROXY_CODE_HASH is required"
-    echo "Usage: ./deploy-factory.sh <FACTORY_OWNER> <GLOBAL_PROXY_CODE_HASH> <NETWORK>"
+    echo "Error: GLOBAL_TRADING_ACCOUNT_BS58_HASH is required"
+    echo "Usage: ./deploy-factory.sh <FACTORY_OWNER> <GLOBAL_TRADING_ACCOUNT_BS58_HASH> <NETWORK>"
     echo "Example: ./deploy-factory.sh dao.peerfolio.testnet FTwNLjNXmku6hKVnXSP9Q9QmnwcTqzpG8dhFeoic5DsK"
     exit 1
 fi
 
 FACTORY_OWNER="$1"
-GLOBAL_PROXY_CODE_HASH="$2"
+GLOBAL_TRADING_ACCOUNT_BS58_HASH="$2"
 NETWORK="${3:-testnet}" # default to testnet if not specified
 
 echo "Using NETWORK: $NETWORK"
 echo "Using FACTORY_OWNER: $FACTORY_OWNER"
-echo "Using GLOBAL_PROXY_CODE_HASH: $GLOBAL_PROXY_CODE_HASH"
+echo "Using GLOBAL_TRADING_ACCOUNT_BS58_HASH: $GLOBAL_TRADING_ACCOUNT_BS58_HASH"
 
 # Set variables
 WASM_PATH="target/near/proxy_factory.wasm"
@@ -51,7 +51,7 @@ if ! near state "$FACTORY_ACCOUNT" &>/dev/null; then
     "$FACTORY_ACCOUNT" \
     "$WASM_PATH" \
     --initFunction "new" \
-    --initArgs '{"owner_id":"'"$FACTORY_OWNER"'", "network":"'"$NETWORK"'", "global_proxy_base58_hash":"'"$GLOBAL_PROXY_CODE_HASH"'"}'
+    --initArgs '{"owner_id":"'"$FACTORY_OWNER"'", "network":"'"$NETWORK"'", "global_proxy_base58_hash":"'"$GLOBAL_TRADING_ACCOUNT_BS58_HASH"'"}'
  else
     near deploy \
     "$FACTORY_ACCOUNT" \
