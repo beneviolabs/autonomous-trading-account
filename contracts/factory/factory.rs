@@ -25,7 +25,8 @@ impl TradingAccountFactory {
 
         let signer_contract = match network.as_str() {
             "mainnet" => MAINNET_SIGNER,
-            _ => TESTNET_SIGNER,
+            "testnet" => TESTNET_SIGNER,
+            _ => env::panic_str("network must be \"mainnet\" or \"testnet\""),
         }
         .parse()
         .unwrap();
@@ -53,6 +54,13 @@ impl TradingAccountFactory {
 
     #[payable]
     pub fn create_proxy_global(&mut self, owner_id: AccountId) -> Promise {
+        // Only the owner may create their own trading account. Without this, anyone could
+        // create an account for an owner id whose derived name collides with a victim's.
+        assert_eq!(
+            env::predecessor_account_id(),
+            owner_id,
+            "Only owner_id can create its trading account"
+        );
         let trimmed_owner = self.get_base_account_name(&owner_id);
         let full_sub_account: AccountId =
             format!("{}.{}", trimmed_owner, env::current_account_id())
@@ -99,40 +107,16 @@ impl TradingAccountFactory {
         }
     }
 
+    /// Derives the trading-account subaccount name from the full owner id.
+    ///
+    /// The name is the first 20 bytes of sha256(owner_id) as hex (40 chars), so distinct
+    /// owner ids (named, implicit, any suffix) cannot map to the same name. 40 chars keeps
+    /// `<name>.auth.peerfolio.testnet` within NEAR's 64-char account id limit.
     pub fn get_base_account_name(&self, owner_id: &AccountId) -> String {
-        let account_str = owner_id.as_str();
-
-        if account_str.ends_with(".testnet") || account_str.ends_with(".near") {
-            // Extract the account name
-            let domain_start = if account_str.ends_with(".testnet") {
-                account_str.len() - 8 // ".testnet".len()
-            } else {
-                account_str.len() - 5 // ".near".len()
-            };
-
-            let account_part = &account_str[..domain_start];
-
-            // Replace dots with hyphens for subaccounts
-            account_part.replace('.', "-")
-        } else if account_str.len() == 64 {
-            // Implicit account: take the first 32 chars
-            let hash_input = &account_str[..32];
-            // hash them and encode first 12 bytes as hex to get 24-char result
-            let hash = env::sha256(hash_input.as_bytes());
-            let truncated = hex::encode(&hash[..12]); // 24 chars (12 bytes * 2)
-
-            // with this approach, we would need ~2^36 (68 billion) implicit accounts to have a
-            // 50% chance of collision between base account names.
-            // Even with millions of implicit accounts, collision risk is negligible
-            format!("implicit_{}", truncated)
-        } else {
-            near_sdk::env::panic_str(
-                "Unsupported account name format for base account name extraction",
-            );
-        }
+        hex::encode(&env::sha256(owner_id.as_bytes())[..20])
     }
 
-    /// Utility method to check if a given implicit base account name corresponds to a specific owner_id
+    /// Utility method to check if a given base account name corresponds to a specific owner_id
     pub fn verify_implicit_base_name(&self, owner_id: AccountId, base_name: String) -> bool {
         let expected_base_name = self.get_base_account_name(&owner_id);
         expected_base_name == base_name
@@ -190,13 +174,6 @@ impl TradingAccountFactory {
 
     pub fn get_signer_contract(&self) -> AccountId {
         self.signer_contract.clone()
-    }
-}
-
-#[cfg(test)]
-impl TradingAccountFactory {
-    pub(crate) fn test_get_base_account_name(&self, owner_id: &AccountId) -> String {
-        self.get_base_account_name(owner_id)
     }
 }
 
