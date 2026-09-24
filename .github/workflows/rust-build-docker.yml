@@ -39,8 +39,8 @@ jobs:
         run: make docker-clippy
 
       - name: Build contracts
-      # Same script as local builds (contracts/build_wasm.sh), so the printed sha256 hashes
-      # should match a local build of the same commit.
+      # Canonical build: the printed sha256 hashes are the ones to record in DAO proposals,
+      # and `make docker-build-contracts` reproduces them for the same commit.
         run: make docker-build-contracts
 
       - name: Run tests
@@ -76,3 +76,7 @@ jobs:
       - name: Dependency vulnerability scan
         uses: actions/dependency-review-action@v4
         if: github.event_name == 'pull_request'
+        with:
+          # time (RUSTSEC-2026-0009): the fix needs Rust 1.88 and time never reaches the
+          # contract wasm. Mirrors contracts/.cargo/audit.toml.
+          allow-ghsas: GHSA-r6v5-fh4h-64xc

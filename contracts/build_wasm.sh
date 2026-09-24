@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# Builds one contract crate's wasm so the same commit gives the same hash locally and in
-# Docker/CI, which the DAO proposal relies on to tie a wasm hash to a source commit.
+# Builds one contract crate's wasm. Local scripts and Docker/CI both use it.
 #
 # Usage: ./build_wasm.sh <crate dir> <wasm file name>
 #
+# The canonical, reproducible hash (the one for DAO proposals) comes from running this in
+# the linux/amd64 Docker image: `make docker-build-contracts`. A native build on another
+# host (e.g. macOS arm64) still produces different code, so its hash won't match.
+#
 # - Rust and cargo-near versions are pinned (cargo-near bundles wasm-opt).
 # - $CARGO_HOME is remapped, because panic locations embed dependency source paths
-#   (/Users/<you>/.cargo/registry/... locally, /root/.cargo/registry/... in Docker).
+#   (/Users/<you>/.cargo/registry/... locally, /root/.cargo/registry/... in Docker), which
+#   would otherwise make even Docker builds depend on the user running them.
 set -euo pipefail
 
 NEAR_RUST_TOOLCHAIN="${NEAR_RUST_TOOLCHAIN:-1.85.0}"
