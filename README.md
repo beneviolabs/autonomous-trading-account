@@ -7,10 +7,12 @@
     - Stores proxy code hash for verification
     - Creates proxy instances with proper initialization (see below for example)
     - Ensures secure deployment with minimum deposit requirements
-    Example usage: `near call auth-v0.peerfolio.testnet deposit_and_create_proxy_global \
-  '{"owner_id": "alice.testnet"}' \
-  --accountId alice.testnet \
-  --deposit 4`
+    - Only accepts NEAR implicit owners (64 lowercase hex chars), and only the owner can create its own trading account
+    - Names the trading account `implicit_<first 32 hex of sha256(owner_id)>.<factory>`; call `get_base_account_name` to get it
+    Example usage: `near call auth.peerfolio.testnet deposit_and_create_proxy_global \
+  '{"owner_id": "<64-hex implicit account>"}' \
+  --accountId <64-hex implicit account> \
+  --deposit 0.12`
 
     2. Auth Proxy Contract (auth_proxy.rs):
 
@@ -18,7 +20,7 @@
     - Handles MPC signature generation for approved transactions
     - Restricts contract interactions to predefined set (wrap.near, intents.near)
     - Supports specific methods (near_deposit, add_public_key, etc.)
-    Example usage: `near call alice.auth-v0.peerfolio.testnet  request_signature \
+    Example usage: `near call implicit_<32hex>.auth.peerfolio.testnet request_signature \
   '{...signature_args...}' \
   --accountId authorized-agent.testnet`
 
@@ -31,12 +33,12 @@ sequenceDiagram
     autonumber
     participant Wallet as NEAR (& Wallet) <br> (crypto-native wallet<br>user.near)
     participant User as User <br> (Browser)
-    participant ProxyFac as Proxy Factory <br>(ProxyFactory contract<br>auth-v0.peerfolio.near)
-    participant TradingAcc as Proxy/Trading Account <br>(user.auth-v0.peerfolio.near)
+    participant ProxyFac as Proxy Factory <br>(ProxyFactory contract<br>auth.peerfolio.near)
+    participant TradingAcc as Proxy/Trading Account <br>(implicit_<32hex>.auth.peerfolio.near)
     participant MPC as MPC Contract
 
     User->>Wallet: Connect wallet
-    Wallet->>User: Function call key for <br> auth-v0.peerfolio.near <br> (limited access)
+    Wallet->>User: Function call key for <br> auth.peerfolio.near <br> (limited access)
     critical Approve txn
         User->>Wallet: (deposit_and_create_proxy_global) <br> w/ 0.004 Ⓝ
     option no balance
@@ -78,7 +80,7 @@ sequenceDiagram
     autonumber
     participant Agent as Agentic Process <br> (authorized-agent.near)
     participant User as Trading Contract Owner <br> (user.near)
-    participant Proxy as Proxy/Trading Account <br>(user.auth-v0.peerfolio.near)
+    participant Proxy as Proxy/Trading Account <br>(implicit_<32hex>.auth.peerfolio.near)
     participant MPC as MPC Contract <br>(v1.signer-prod.near)
     participant Target as Target Contract <br>(wrap.near / intents.near)
     participant NEAR as NEAR Protocol
@@ -134,12 +136,12 @@ sequenceDiagram
 
 1. Add your main account public key to the proxy account with full access permissions
 ```
-near contract call-function as-transaction <mainaccount>.auth-v0.peerfolio.testnet add_full_access_key json-args '{"public_key": "<main-account-public-key>"}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' sign-as <mainaccount>.testnet network-config testnet sign-with-keychain send
+near contract call-function as-transaction <trading-account-id> add_full_access_key json-args '{"public_key": "<main-account-public-key>"}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' sign-as <main-account-id> network-config testnet sign-with-keychain send
 ```
 
 2. Send a delete account transaction signing with your main account private key
 ```
-near account delete-account <mainaccount>.auth-v0.peerfolio.testnet beneficiary <mainaccount>.testnet network-config testnet sign-with-plaintext-private-key
+near account delete-account <trading-account-id> beneficiary <main-account-id> network-config testnet sign-with-plaintext-private-key
 ```
 
 
@@ -151,7 +153,7 @@ near account delete-account <mainaccount>.auth-v0.peerfolio.testnet beneficiary 
 #### Setup dependencies
 1. Install near-cli-rs
 2. Set your target network as an environment variable e.g. `export NEAR_ENV=testnet`
-3. Also add your factory account address and factory owner address into factory/deploy-factory.sh, e.g. `FACTORY_ACCOUNT="auth-v0.peerfolio.$NETWORK"
+3. Also add your factory account address and factory owner address into factory/deploy-factory.sh, e.g. `FACTORY_ACCOUNT="auth.peerfolio.$NETWORK"
 FACTORY_OWNER="peerfolio.$NETWORK"`
 4. Login with a near testnet account and choose to save the private key into your mac's keychain, `near login`
 5. Need tokens? Use a [Near testnet faucet](https://near-faucet.io/) to fund your account.

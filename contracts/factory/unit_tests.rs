@@ -238,13 +238,22 @@ mod tests {
             "implicit_84a19ae54521c69d4baa0885f3319bc8.near",
             // ETH implicit.
             "0x06012c8cf97bead5deae237070f9587f8e7a266d",
-            // 64 chars but not lowercase hex.
-            "98793CD91A3F870FB126F66285808C7E094AFCFC4EDA8A970F6648CDF0DBD6DE",
+            // 64 chars but not hex: a valid top-level named account anyone can register.
+            "98793cd91a3f870fb126f66285808c7e094afcfc4eda8a970f6648cdf0dbd6dg",
             "invalid_account_format",
         ] {
-            let result = std::panic::catch_unwind(|| base_name(&contract, owner_id));
+            // Parse outside catch_unwind so only the contract's own check can pass the test.
+            let owner: AccountId = owner_id.parse().unwrap();
+            let result = std::panic::catch_unwind(|| contract.get_base_account_name(&owner));
             assert!(result.is_err(), "{} should be rejected", owner_id);
         }
+    }
+
+    #[test]
+    fn test_uppercase_hex_never_reaches_the_contract() {
+        // AccountId rejects uppercase, so JSON args carrying one fail before the method runs.
+        let uppercase = "98793CD91A3F870FB126F66285808C7E094AFCFC4EDA8A970F6648CDF0DBD6DE";
+        assert!(uppercase.parse::<AccountId>().is_err());
     }
 
     #[test]

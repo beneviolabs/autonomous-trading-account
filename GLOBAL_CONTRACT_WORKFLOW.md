@@ -59,9 +59,12 @@ Edit `contracts/factory/deploy-factory.sh`:
 GLOBAL_PROXY_CODE_HASH="EaFtguW8o7cna1k8EtD4SFfGNdivuCPhx2Qautn7J3Rz"
 
 # Set the factory account
-FACTORY_ACCOUNT="auth-v1.base-account.testnet"
+FACTORY_ACCOUNT="auth.peerfolio.testnet"
 FACTORY_OWNER="base-account.testnet"
 ```
+
+The factory account id can be at most 22 characters (`auth.peerfolio.testnet` is exactly 22).
+Trading accounts are named `implicit_<32hex>.<factory>`, and NEAR account ids are capped at 64 characters.
 
 ### Step 2.2: Deploy Factory Contract
 
@@ -75,7 +78,7 @@ NEAR_ENV=testnet ./deploy-factory.sh
 
 **What happens:**
 1. Builds the factory contract with global-contracts feature enabled
-2. Creates the factory account, auth-v1.base-account.testnet if it doesn't exist
+2. Creates the factory account, auth.peerfolio.testnet if it doesn't exist
 3. Deploys the factory with the global contract hash
 4. Verifies deployment and checksums
 
@@ -85,7 +88,7 @@ The base58 hash output from the call below should match the hash output from the
 
 ```bash
 # View the stored global contract hash
-near call auth-v1.base-account.testnet get_proxy_code_base58_hash --accountId base-account.testnet
+near call auth.peerfolio.testnet get_proxy_code_base58_hash --accountId base-account.testnet
 ```
 
 
@@ -110,7 +113,7 @@ If you've deployed a new version of the auth proxy globally:
 
 ```bash
 # Update the factory with new base58 encoded global contract hash
-near call auth-v1.base-account.testnet set_global_code_hash \
+near call auth.peerfolio.testnet set_global_code_hash \
   '{"code_hash_str": "NEW_GLOBAL_HASH_HERE"}' \
   --accountId base-account.testnet
 ```
@@ -133,34 +136,44 @@ NEAR_ENV=testnet ./deploy-factory.sh
 
 ```bash
 # Check the updated global hash via get_proxy_code_hash_hex or get_proxy_code_base58_hash
-near call auth-v1.base-account.testnet get_proxy_code_base58_hash --accountId base-account.testnet
+near call auth.peerfolio.testnet get_proxy_code_base58_hash --accountId base-account.testnet
 
 
 ## 4. Create Trading Account via Global Contract
 
 ### Step 4.1: Create Proxy Account
 
+The owner must be a NEAR implicit account (64 lowercase hex chars) and must sign the call itself.
+Named accounts, ETH-implicit accounts and calls on another owner's behalf are rejected.
+
 ```bash
+OWNER=<64-hex implicit account>
+
+# Look up the trading account name the factory will create
+near view auth.peerfolio.testnet get_base_account_name "{\"owner_id\": \"$OWNER\"}"
+
 # Create a new proxy account using the global contract
-near call auth-v1.peerfolio.testnet deposit_and_create_proxy_global \
-  '{"owner_id": "trader.peerfolio.testnet"}' \
-  --accountId trader.peerfolio.testnet \
-  --deposit 0.001
+near call auth.peerfolio.testnet deposit_and_create_proxy_global \
+  "{\"owner_id\": \"$OWNER\"}" \
+  --accountId $OWNER \
+  --deposit 0.12
 ```
 
 **Expected Result:**
-- Creates sub-account: `trader.auth-v1.peerfolio.testnet`
+- Creates sub-account: `implicit_<32hex>.auth.peerfolio.testnet`, the name returned by `get_base_account_name`
 - Uses global contract code (no individual deployment)
-- Costs only ~0.001 NEAR instead of ~3.8 NEAR
+- Costs a fraction of a NEAR instead of ~3.8 NEAR
+
+The derived name is only for creating the account. Once it exists, store its account id and use that; don't re-derive it. Trading accounts created before the naming change keep their old `implicit_<24hex>` names.
 
 ### Step 4.2: Verify Proxy Creation
 
 ```bash
 # Check the created proxy account
-near state trader.auth-v1.peerfolio.testnet
+near state implicit_<32hex>.auth.peerfolio.testnet
 
 # Verify it's Global Contract (by Hash: SHA-256 checksum hex) matches the factory's hex hash of the bs58 code
-near call auth-v1.peerfolio.testnet get_proxy_code_hash_hex '{}'
+near call auth.peerfolio.testnet get_proxy_code_hash_hex '{}'
 ```
 
 ## Migration Strategy
