@@ -206,27 +206,40 @@ mod tests {
     }
 
     #[test]
-    fn test_get_base_account_name_is_40_char_hex_of_full_owner_id() {
+    fn test_get_base_account_name_named_accounts_hash_full_id() {
         let contract = factory();
         for owner_id in [
             "alice.testnet",
             "defi.trading.alice.near",
-            "98793cd91a3f870fb126f66285808c7e094afcfc4eda8a82f911432ac1b5dffd",
             "0x06012c8cf97bead5deae237070f9587f8e7a266d",
             "invalid_account_format",
         ] {
             let name = base_name(&contract, owner_id);
             let expected = hex::encode(&near_sdk::env::sha256(owner_id.as_bytes())[..20]);
             assert_eq!(name, expected, "Failed for input: {}", owner_id);
-            assert_eq!(name.len(), 40);
-            // Must be a valid subaccount of the longest factory account id.
+            assert!(!name.starts_with("implicit_"));
             let full: Result<AccountId, _> = format!("{}.auth.peerfolio.testnet", name).parse();
             assert!(full.is_ok(), "{} should be a valid account id", name);
         }
+    }
+
+    #[test]
+    fn test_get_base_account_name_implicit_format_unchanged() {
+        let contract = factory();
+        // Pinned to the pre-fix derivation so existing implicit users keep their names.
         assert_eq!(
-            base_name(&contract, "alice.near"),
-            base_name(&contract, "alice.near")
+            base_name(
+                &contract,
+                "98793cd91a3f870fb126f66285808c7e094afcfc4eda8a970f6648cdf0dbd6de"
+            ),
+            "implicit_c9a8418ddb0c0ef15e2c857b"
         );
+        let other = base_name(
+            &contract,
+            "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+        );
+        assert!(other.starts_with("implicit_"));
+        assert_eq!(other.len(), 33);
     }
 
     // Regression tests for pen test finding #1: distinct owner ids used to collide.
