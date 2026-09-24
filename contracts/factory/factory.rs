@@ -109,41 +109,33 @@ impl TradingAccountFactory {
 
     /// Derives the trading-account subaccount name (`<name>.<factory>`) from `owner_id`.
     ///
-    /// - NEAR implicit accounts (64 lowercase hex chars) keep the original format,
-    ///   `implicit_` + hex(sha256(first 32 chars))[..24], so existing implicit users' names
-    ///   are unchanged.
-    /// - Every other account id becomes hex(sha256(full owner_id))[..40]. No suffix
-    ///   stripping or dot replacement, so `alice.near`/`alice.testnet` and
-    ///   `sub.alice.near`/`sub-alice.near` no longer collide.
+    /// Only NEAR implicit accounts (64 lowercase hex chars) are supported. The name is
+    /// `implicit_` + hex(sha256(first 32 chars))[..24], unchanged from the original
+    /// derivation so existing users keep their names. Any other id panics: named ids used to
+    /// be mapped by stripping `.near`/`.testnet` and replacing dots, which let distinct owners
+    /// collide (e.g. `alice.near`/`alice.testnet`, `sub.alice.near`/`sub-alice.near`, and a
+    /// registered `implicit_<24hex>.near` taking an implicit user's name).
     ///
-    /// The two shapes cannot collide with each other: hashed names are pure hex and never
-    /// start with `implicit_`, so registering `implicit_<24hex>.near` no longer maps onto an
-    /// implicit user's name. The longest result (40 chars + `.auth.peerfolio.testnet`) is
-    /// 63 chars, within NEAR's 64-char limit.
+    /// Collision risk: the name is 96 bits of SHA-256 over the first 16 bytes of the owner's
+    /// ed25519 public key.
+    /// - Random collision between two users: ~2^48 implicit accounts (birthday bound).
+    /// - Targeting a specific victim: a keypair whose public key matches the victim's first
+    ///   16 bytes (~2^128 work) or a 96-bit second preimage (~2^96 work).
     ///
-    /// Collision risk (both branches are truncated SHA-256):
-    /// - Implicit: 96-bit output, and the input is the first 16 bytes of the ed25519 public
-    ///   key. A random collision between two users needs ~2^48 implicit accounts (birthday
-    ///   bound). Targeting a specific victim needs a keypair whose public key matches the
-    ///   victim's first 16 bytes (~2^128 work) or a 96-bit second preimage (~2^96 work).
-    /// - Named: 160-bit output. A random collision needs ~2^80 accounts; targeting a specific
-    ///   victim needs a 160-bit second preimage (~2^160 work).
-    ///
-    /// On top of that, `create_proxy_global` only lets `owner_id` create its own account, so
-    /// even a colliding id could only claim a slot by owning that colliding account.
+    /// And since `create_proxy_global` only lets `owner_id` create its own account, a
+    /// colliding id could only claim a slot by holding that colliding account's key.
     pub fn get_base_account_name(&self, owner_id: &AccountId) -> String {
         let account_str = owner_id.as_str();
         let is_near_implicit = account_str.len() == 64
             && account_str
                 .bytes()
                 .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
-
-        if is_near_implicit {
-            let hash = env::sha256(account_str[..32].as_bytes());
-            format!("implicit_{}", hex::encode(&hash[..12]))
-        } else {
-            hex::encode(&env::sha256(account_str.as_bytes())[..20])
+        if !is_near_implicit {
+            env::panic_str("owner_id must be a NEAR implicit account");
         }
+
+        let hash = env::sha256(account_str[..32].as_bytes());
+        format!("implicit_{}", hex::encode(&hash[..12]))
     }
 
     /// Utility method to check if a given base account name corresponds to a specific owner_id
