@@ -39,7 +39,8 @@ jobs:
         run: make docker-clippy
 
       - name: Build contracts
-      # Use cargo-near's default wasm optimization; plain cargo wasm is not sandbox-compatible.
+      # Same script as local builds (contracts/build_wasm.sh), so the printed sha256 hashes
+      # should match a local build of the same commit.
         run: make docker-build-contracts
 
       - name: Run tests

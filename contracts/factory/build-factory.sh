@@ -41,7 +41,7 @@ cargo fmt
 
 # Build the contract
 echo "Building contract..."
-cargo "+$NEAR_RUST_TOOLCHAIN" near build non-reproducible-wasm --no-abi
+NEAR_RUST_TOOLCHAIN="$NEAR_RUST_TOOLCHAIN" ../build_wasm.sh . proxy_factory.wasm
 
 WASM_PATH="target/near/proxy_factory.wasm"
 

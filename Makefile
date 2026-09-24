@@ -2,7 +2,6 @@
 
 # Build contracts with the Rust version supported by near-sandbox/nearcore.
 NEAR_RUST_TOOLCHAIN ?= 1.85.0
-BUILD_CMD = cargo +$(NEAR_RUST_TOOLCHAIN) near build non-reproducible-wasm --no-abi
 
 # Docker commands for faster CI actions
 docker-build:
@@ -18,11 +17,11 @@ docker-clippy:
 	docker run --rm -v $(PWD):/workspace -w /workspace near-contract-builder bash -c "cd contracts && cargo clippy -- -D warnings"
 
 docker-audit:
-	docker run --rm -v $(PWD):/workspace -w /workspace near-contract-builder bash -c "cd contracts && cargo audit"
+	docker run --rm -v $(PWD):/workspace -w /workspace near-contract-builder bash -c "cd contracts && cargo audit && cd factory && cargo audit"
 
-# Build contracts using consistent build command
+# Build contracts with the same script used locally, so the wasm hashes match.
 docker-build-contracts:
-	docker run --rm -v $(PWD):/workspace -w /workspace near-contract-builder bash -c "cd contracts && rm -f target/near/proxy_contract.wasm && $(BUILD_CMD) && cd factory && rm -f target/near/proxy_factory.wasm && $(BUILD_CMD)"
+	docker run --rm -v $(PWD):/workspace -w /workspace near-contract-builder bash -c "cd contracts && NEAR_RUST_TOOLCHAIN=$(NEAR_RUST_TOOLCHAIN) ./build_wasm.sh . proxy_contract.wasm && NEAR_RUST_TOOLCHAIN=$(NEAR_RUST_TOOLCHAIN) ./build_wasm.sh factory proxy_factory.wasm"
 
 docker-clean:
 	docker system prune -f

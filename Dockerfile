@@ -27,7 +27,8 @@ RUN rustup toolchain install stable --profile minimal && \
     rustup component add rustfmt clippy --toolchain stable
 
 # Install cargo-near and cargo-audit
-RUN cargo install cargo-near --version 0.15.0 --locked
+# Keep in sync with CARGO_NEAR_VERSION in contracts/build_wasm.sh.
+RUN cargo install cargo-near --version 0.16.0 --locked
 RUN cargo install cargo-audit
 
 # Set working directory
