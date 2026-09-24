@@ -1,7 +1,8 @@
 .PHONY: docker-build docker-run docker-test docker-clean help
 
-# Build  contracts - NOTICE! This produces a different wasm/hash than ./build_auth_proxy.sh due to the --no-wasmopt flag which is required to avoid an incompatibility issue with the global memory feature in docker/cargo
-BUILD_CMD = RUSTFLAGS='-Z unstable-options' cargo +nightly near build non-reproducible-wasm --no-abi --no-wasmopt
+# Build contracts with the Rust version supported by near-sandbox/nearcore.
+NEAR_RUST_TOOLCHAIN ?= 1.85.0
+BUILD_CMD = cargo +$(NEAR_RUST_TOOLCHAIN) near build non-reproducible-wasm --no-abi
 
 # Docker commands for faster CI actions
 docker-build:
@@ -21,7 +22,7 @@ docker-audit:
 
 # Build contracts using consistent build command
 docker-build-contracts:
-	docker run --rm -v $(PWD):/workspace -w /workspace near-contract-builder bash -c "cd contracts && $(BUILD_CMD) && cd factory && $(BUILD_CMD)"
+	docker run --rm -v $(PWD):/workspace -w /workspace near-contract-builder bash -c "cd contracts && rm -f target/near/proxy_contract.wasm && $(BUILD_CMD) && cd factory && rm -f target/near/proxy_factory.wasm && $(BUILD_CMD)"
 
 docker-clean:
 	docker system prune -f

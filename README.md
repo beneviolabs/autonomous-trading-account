@@ -151,25 +151,33 @@ near account delete-account <mainaccount>.auth-v0.peerfolio.testnet beneficiary 
 #### Setup dependencies
 1. Install near-cli-rs
 2. Set your target network as an environment variable e.g. `export NEAR_ENV=testnet`
-3. Also add your factory account address and factory owner address into factory/factory-deploy.sh, e.g. `FACTORY_ACCOUNT="auth-v0.peerfolio.$NETWORK"
+3. Also add your factory account address and factory owner address into factory/deploy-factory.sh, e.g. `FACTORY_ACCOUNT="auth-v0.peerfolio.$NETWORK"
 FACTORY_OWNER="peerfolio.$NETWORK"`
 4. Login with a near testnet account and choose to save the private key into your mac's keychain, `near login`
 5. Need tokens? Use a [Near testnet faucet](https://near-faucet.io/) to fund your account.
 6. Build and install rust tooling
 
     ```bash
-    # if running on Apple Silicon.
-    rustup toolchain install nightly-aarch64-apple-darwin
-    rustup component add rust-src --toolchain nightly-aarch64-apple-darwin
-    cd contracts && ./build_auth_proxy.sh
-    cd factory && ./factory-deploy.sh
+    # The repository pins Rust 1.85.0 for near-sandbox-compatible wasm.
+    rustup toolchain install 1.85.0-aarch64-apple-darwin
+    rustup target add wasm32-unknown-unknown --toolchain 1.85.0-aarch64-apple-darwin
+    cd contracts && ./build_trading_account.sh
+    cd factory && ./deploy-factory.sh
     ```
+
+### Running tests
+
+The test script builds the proxy wasm with `cargo near` before enabling the sandbox integration
+tests. The test profile disables debug assertions because near-sdk's debug-only mock blockchain
+check aborts on some host toolchains, while retaining panic unwinding for `#[should_panic]` tests.
+
+```bash
+cd contracts
+./test.sh
+```
 
 #### Test Requesting Signatures
 1. Go to [NearBlocks](https://testnet.nearblocks.io/), on the upper right select the `Near Icon`, then `testnet`, then click into a `Latest Block` and copy the block hash.  Now you can simulate a program or agent using your proxy contract by requesting a signature, `./request_signature.sh <block hash> < add_key | deposit > <your-other-account.testnet>`
 2. If successful, transaction logs (view them in your terminal or on nearblocks.io) should display the Reconstructed Signature in base64 (scroll up or search for `Signed transaction (base64)`).  Pass this signature `./submit_txn.sh` to test broadcasting this testnet transaction. `./submit_txn.sh FAAAAGNoYXJsZXNsYXZvbi50ZXN0bmV0AQD1k+Pq3bhLFaNXClzgx0fEBmZItkkolypTJq0v0O6JOB856PxW5l+TZwD6MTrEBY+xsI/3wBgz2RNY+Ax5RETZq+2FlQEAAAwAAAB3cmFwLnRlc3RuZXQwRFzWCwWaY4pPFHl46Bj87dj6JLtdm28rjKf37iFc4QEAAAACDAAAAG5lYXJfZGVwb3NpdAAAAAAAoHJOGAkAAAAAAKHtzM4bwtMAAAAAAAAButebmlYXbKcuRM9NfWfgOAdR9jzGvS4Fv53T4/wOGjwwjizI0PvKnpaCpsxkNyTFZHQEVpYkCNPnUbabAYYx/QI=`
-
-
-
 
 

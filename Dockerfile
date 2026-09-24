@@ -2,6 +2,8 @@
 ARG PLATFORM=linux/amd64
 FROM --platform=$PLATFORM ubuntu:22.04
 
+ARG RUST_TOOLCHAIN=1.85.0
+
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     curl \
@@ -17,12 +19,12 @@ RUN apt-get update && apt-get install -y \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-# Install Rust toolchains and targets
-RUN rustup toolchain install stable nightly
-RUN rustup target add wasm32-unknown-unknown --toolchain stable
-RUN rustup target add wasm32-unknown-unknown --toolchain nightly
-RUN rustup component add rustfmt clippy --toolchain stable
-RUN rustup component add rust-src --toolchain nightly
+# Keep the general development tools current, but use the pinned version for wasm builds.
+RUN rustup toolchain install stable --profile minimal && \
+    rustup toolchain install ${RUST_TOOLCHAIN} --profile minimal && \
+    rustup default stable && \
+    rustup target add wasm32-unknown-unknown --toolchain ${RUST_TOOLCHAIN} && \
+    rustup component add rustfmt clippy --toolchain stable
 
 # Install cargo-near and cargo-audit
 RUN cargo install cargo-near --version 0.15.0 --locked

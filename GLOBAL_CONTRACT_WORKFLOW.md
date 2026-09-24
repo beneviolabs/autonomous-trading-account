@@ -9,8 +9,8 @@ The global contract feature (NEP-591) allows deploying contract code once global
 ## Prerequisites
 
 - NEAR CLI installed (`npm install -g near-cli`)
-- Rust toolchain with wasm32-unknown-unknown target
-- near's cargo extension to support running: `./contracts/build_auth_proxy.sh` and `/contracts/factory/factory-deploy.sh`
+- Rust 1.85.0 toolchain with the wasm32-unknown-unknown target
+- `cargo-near` to build the contracts
 
 ## 1. Build and Globally Deploy Auth Proxy Contract
 
@@ -21,7 +21,7 @@ The global contract feature (NEP-591) allows deploying contract code once global
 cd contracts
 
 # Build the auth proxy contract
-./build_auth_proxy.sh
+./build_trading_account.sh
 ```
 
 Notice the bs58 hash in the output
@@ -52,7 +52,7 @@ near contract deploy-as-global \
 
 ### Step 2.1: Update Deployment Script
 
-Edit `contracts/factory/factory-deploy.sh`:
+Edit `contracts/factory/deploy-factory.sh`:
 
 ```bash
 # Set the global contract hash from step 1.2
@@ -70,7 +70,7 @@ FACTORY_OWNER="base-account.testnet"
 cd contracts/factory
 
 # Run the deployment script
-NEAR_ENV=testnet ./factory-deploy.sh
+NEAR_ENV=testnet ./deploy-factory.sh
 ```
 
 **What happens:**
@@ -81,7 +81,7 @@ NEAR_ENV=testnet ./factory-deploy.sh
 
 ### Step 2.3: Verify Factory Deployment
 
-The base58 hash output from the call below should match the hash output from the global deploy transaction, and match the bs58 output if you re-run `./build_auth_proxy.sh`. There is no harm in running that command multiple times.
+The base58 hash output from the call below should match the hash output from the global deploy transaction, and match the bs58 output if you re-run `./build_trading_account.sh`. There is no harm in running that command multiple times.
 
 ```bash
 # View the stored global contract hash
@@ -124,7 +124,7 @@ For factory code updates:
 cd contracts/factory
 
 # Run deployment script (will update existing contract)
-NEAR_ENV=testnet ./factory-deploy.sh
+NEAR_ENV=testnet ./deploy-factory.sh
 ```
 
 **Note:** The script automatically detects if the account exists and updates the contract instead of creating a new one.
