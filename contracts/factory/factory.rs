@@ -54,8 +54,8 @@ impl TradingAccountFactory {
 
     #[payable]
     pub fn create_proxy_global(&mut self, owner_id: AccountId) -> Promise {
-        // Only the owner may create their own trading account. Without this, anyone could
-        // create an account for an owner id whose derived name collides with a victim's.
+        // Only the owner may create their own trading account, so nobody can create one
+        // for another owner id whose derived name collides with it.
         assert_eq!(
             env::predecessor_account_id(),
             owner_id,
@@ -109,21 +109,17 @@ impl TradingAccountFactory {
 
     /// Derives the trading-account subaccount name (`<name>.<factory>`) from `owner_id`.
     ///
-    /// Only NEAR implicit accounts (64 lowercase hex chars) are supported. The name is
-    /// `implicit_` + hex(sha256(first 32 chars))[..24], unchanged from the original
-    /// derivation so existing users keep their names. Any other id panics: named ids used to
-    /// be mapped by stripping `.near`/`.testnet` and replacing dots, which let distinct owners
-    /// collide (e.g. `alice.near`/`alice.testnet`, `sub.alice.near`/`sub-alice.near`, and a
-    /// registered `implicit_<24hex>.near` taking an implicit user's name).
+    /// Owners must be NEAR implicit accounts (64 lowercase hex chars); anything else panics.
+    /// The name is `implicit_` + the first 16 bytes of sha256(owner_id) as hex (41 chars),
+    /// which is the most that fits: `<name>.auth.peerfolio.testnet` is exactly 64 chars,
+    /// NEAR's account id limit.
     ///
-    /// Collision risk: the name is 96 bits of SHA-256 over the first 16 bytes of the owner's
-    /// ed25519 public key.
-    /// - Random collision between two users: ~2^48 implicit accounts (birthday bound).
-    /// - Targeting a specific victim: a keypair whose public key matches the victim's first
-    ///   16 bytes (~2^128 work) or a 96-bit second preimage (~2^96 work).
+    /// Collision risk (128-bit truncated SHA-256 of the full owner id):
+    /// - Random collision between any two owners: ~2^64 implicit accounts (birthday bound).
+    /// - Targeting a specific victim: a 128-bit second preimage, ~2^128 work.
     ///
-    /// And since `create_proxy_global` only lets `owner_id` create its own account, a
-    /// colliding id could only claim a slot by holding that colliding account's key.
+    /// Even with a collision, `create_proxy_global` only lets `owner_id` create its own
+    /// account, so an attacker would also need the colliding account's key.
     pub fn get_base_account_name(&self, owner_id: &AccountId) -> String {
         let account_str = owner_id.as_str();
         let is_near_implicit = account_str.len() == 64
@@ -134,8 +130,8 @@ impl TradingAccountFactory {
             env::panic_str("owner_id must be a NEAR implicit account");
         }
 
-        let hash = env::sha256(account_str[..32].as_bytes());
-        format!("implicit_{}", hex::encode(&hash[..12]))
+        let hash = env::sha256(account_str.as_bytes());
+        format!("implicit_{}", hex::encode(&hash[..16]))
     }
 
     /// Utility method to check if a given base account name corresponds to a specific owner_id
