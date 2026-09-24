@@ -32,6 +32,7 @@ pub use crate::models::*;
 pub use crate::serializer::SafeU128;
 
 mod actions;
+#[cfg(all(test, feature = "integration-tests"))]
 mod integration_tests;
 mod models;
 mod serializer;

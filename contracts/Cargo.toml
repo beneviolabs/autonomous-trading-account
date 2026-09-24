@@ -11,6 +11,9 @@ crate-type = ["cdylib", "rlib"]
 name = "proxy_contract"
 path = "auth_proxy.rs"
 
+[features]
+integration-tests = []
+
 
 [dependencies]
 near-sdk = {version = "5.17.2", default-features = false, features = ["unit-testing", "unstable", "legacy"] }
@@ -42,3 +45,7 @@ lto = true
 debug = false
 panic = "abort"
 overflow-checks = true
+
+[profile.test]
+# near-sdk's mocked blockchain trips Rust's debug-only pointer precondition check.
+debug-assertions = false
