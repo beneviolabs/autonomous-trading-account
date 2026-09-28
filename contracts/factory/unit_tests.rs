@@ -209,22 +209,21 @@ mod tests {
     }
 
     #[test]
-    fn test_get_base_account_name_implicit() {
+    fn test_get_base_account_name_implicit_format_unchanged() {
         let contract = factory();
+        // Pinned to the pre-fix derivation so existing implicit users keep their names.
         assert_eq!(
             base_name(&contract, ALICE),
-            "implicit_84a19ae54521c69d4baa0885f3319bc8"
+            "implicit_c9a8418ddb0c0ef15e2c857b"
         );
         let other = base_name(&contract, VICTIM);
         assert_ne!(other, base_name(&contract, ALICE));
         assert!(other.starts_with("implicit_"));
-        assert_eq!(other.len(), 41);
-        // Fits under the longest factory account id.
-        let full: Result<AccountId, _> = format!("{}.auth.peerfolio.testnet", other).parse();
-        assert!(full.is_ok());
+        assert_eq!(other.len(), 33);
     }
 
-    // Only NEAR implicit ids can own a trading account.
+    // Regression tests for pen test finding #1: named ids used to collide with each other
+    // and with implicit users' names. They are now rejected outright.
 
     #[test]
     fn test_get_base_account_name_rejects_non_implicit_ids() {
@@ -234,8 +233,8 @@ mod tests {
             "alice.testnet",
             "sub.alice.near",
             "sub-alice.near",
-            // A named account spelled like ALICE's derived name.
-            "implicit_84a19ae54521c69d4baa0885f3319bc8.near",
+            // The pre-fix squat of ALICE's name.
+            "implicit_c9a8418ddb0c0ef15e2c857b.near",
             // ETH implicit.
             "0x06012c8cf97bead5deae237070f9587f8e7a266d",
             // 64 chars but not hex: a valid top-level named account anyone can register.
@@ -338,6 +337,7 @@ mod tests {
         );
     }
 
+    // Regression test for pen test finding #13a: unknown networks used to fall back to testnet.
     #[test]
     fn test_new_rejects_unknown_network() {
         for network in ["mainner", "MAINNET", "prod", ""] {

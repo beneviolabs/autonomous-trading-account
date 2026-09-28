@@ -8,7 +8,7 @@
     - Creates proxy instances with proper initialization (see below for example)
     - Ensures secure deployment with minimum deposit requirements
     - Only accepts NEAR implicit owners (64 lowercase hex chars), and only the owner can create its own trading account
-    - Names the trading account `implicit_<first 32 hex of sha256(owner_id)>.<factory>`; call `get_base_account_name` to get it
+    - Names the trading account `implicit_<first 24 hex of sha256(first 32 chars of owner_id)>.<factory>`; call `get_base_account_name` to get it
     Example usage: `near call auth.peerfolio.testnet deposit_and_create_proxy_global \
   '{"owner_id": "<64-hex implicit account>"}' \
   --accountId <64-hex implicit account> \
@@ -20,7 +20,7 @@
     - Handles MPC signature generation for approved transactions
     - Restricts contract interactions to predefined set (wrap.near, intents.near)
     - Supports specific methods (near_deposit, add_public_key, etc.)
-    Example usage: `near call implicit_<32hex>.auth.peerfolio.testnet request_signature \
+    Example usage: `near call implicit_<24hex>.auth.peerfolio.testnet request_signature \
   '{...signature_args...}' \
   --accountId authorized-agent.testnet`
 
@@ -34,7 +34,7 @@ sequenceDiagram
     participant Wallet as NEAR (& Wallet) <br> (crypto-native wallet<br>user.near)
     participant User as User <br> (Browser)
     participant ProxyFac as Proxy Factory <br>(ProxyFactory contract<br>auth.peerfolio.near)
-    participant TradingAcc as Proxy/Trading Account <br>(implicit_<32hex>.auth.peerfolio.near)
+    participant TradingAcc as Proxy/Trading Account <br>(implicit_<24hex>.auth.peerfolio.near)
     participant MPC as MPC Contract
 
     User->>Wallet: Connect wallet
@@ -80,7 +80,7 @@ sequenceDiagram
     autonumber
     participant Agent as Agentic Process <br> (authorized-agent.near)
     participant User as Trading Contract Owner <br> (user.near)
-    participant Proxy as Proxy/Trading Account <br>(implicit_<32hex>.auth.peerfolio.near)
+    participant Proxy as Proxy/Trading Account <br>(implicit_<24hex>.auth.peerfolio.near)
     participant MPC as MPC Contract <br>(v1.signer-prod.near)
     participant Target as Target Contract <br>(wrap.near / intents.near)
     participant NEAR as NEAR Protocol

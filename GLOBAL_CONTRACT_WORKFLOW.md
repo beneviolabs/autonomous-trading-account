@@ -63,8 +63,8 @@ FACTORY_ACCOUNT="auth.peerfolio.testnet"
 FACTORY_OWNER="base-account.testnet"
 ```
 
-The factory account id can be at most 22 characters (`auth.peerfolio.testnet` is exactly 22).
-Trading accounts are named `implicit_<32hex>.<factory>`, and NEAR account ids are capped at 64 characters.
+The factory account id can be at most 30 characters.
+Trading accounts are named `implicit_<24hex>.<factory>`, and NEAR account ids are capped at 64 characters.
 
 ### Step 2.2: Deploy Factory Contract
 
@@ -160,17 +160,16 @@ near call auth.peerfolio.testnet deposit_and_create_proxy_global \
 ```
 
 **Expected Result:**
-- Creates sub-account: `implicit_<32hex>.auth.peerfolio.testnet`, the name returned by `get_base_account_name`
+- Creates sub-account: `implicit_<24hex>.auth.peerfolio.testnet`, the name returned by `get_base_account_name`
 - Uses global contract code (no individual deployment)
 - Costs a fraction of a NEAR instead of ~3.8 NEAR
 
-The derived name is only for creating the account. Once it exists, store its account id and use that; don't re-derive it. Trading accounts created before the naming change keep their old `implicit_<24hex>` names.
-
+The derived name is only for creating the account. Once it exists, store its account id and use that; don't re-derive it. 
 ### Step 4.2: Verify Proxy Creation
 
 ```bash
 # Check the created proxy account
-near state implicit_<32hex>.auth.peerfolio.testnet
+near state implicit_<24hex>.auth.peerfolio.testnet
 
 # Verify it's Global Contract (by Hash: SHA-256 checksum hex) matches the factory's hex hash of the bs58 code
 near call auth.peerfolio.testnet get_proxy_code_hash_hex '{}'
