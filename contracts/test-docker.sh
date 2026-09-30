@@ -1,28 +1,23 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
 # Colors for output
 GREEN='\033[0;32m'
-RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 echo -e "${GREEN}Running Auth Proxy Contract Tests (Docker)...${NC}"
 # Run unit tests only, skip integration tests that require sandbox
-cargo test --lib --bins -- --nocapture
-echo ""
-
-echo -e "${GREEN}Running Factory Contract Tests (Docker)...${NC}"
-cd factory
 cargo test --lib -- --nocapture
 echo ""
 
-# Skip integration tests that require near-workspaces which fails in docker
-# cargo test integration_tests --lib -- --nocapture
-TEST_RESULT=$?
+echo -e "${GREEN}Running Factory Contract Tests (Docker)...${NC}"
+cargo test --manifest-path factory/Cargo.toml --lib -- --nocapture
 echo ""
-# Check if any tests failed
-if [ $TEST_RESULT -eq 0 ]; then
-    echo -e "${GREEN}All tests passed!${NC}"
-else
-    echo -e "${RED}Some tests failed!${NC}"
-    exit 1
-fi
+
+# Skip integration tests that require near-workspaces which fails in docker
+# cargo test --features integration-tests --lib integration_tests -- --nocapture
+echo ""
+echo -e "${GREEN}All tests passed!${NC}"

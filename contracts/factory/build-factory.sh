@@ -1,4 +1,7 @@
 #!/bin/bash
+set -euo pipefail
+
+NEAR_RUST_TOOLCHAIN="${NEAR_RUST_TOOLCHAIN:-1.85.0}"
 
 
 # Check required tools
@@ -19,16 +22,10 @@ check_requirements() {
         brew install binaryen
     fi
 
-    # Check if wasm32 target is installed for nightly
-    if ! rustup target list --installed --toolchain nightly | grep -q "wasm32-unknown-unknown"; then
-        echo "Installing wasm32 target for nightly toolchain..."
-        rustup target add wasm32-unknown-unknown --toolchain nightly
-    fi
-
-    # Check if wasm32 target is installed for stable
-    if ! rustup target list --installed | grep -q "wasm32-unknown-unknown"; then
-        echo "Installing wasm32 target for stable toolchain..."
-        rustup target add wasm32-unknown-unknown
+    # Check if wasm32 target is installed for the pinned build toolchain.
+    if ! rustup target list --installed --toolchain "$NEAR_RUST_TOOLCHAIN" | grep -q "wasm32-unknown-unknown"; then
+        echo "Installing wasm32 target for Rust $NEAR_RUST_TOOLCHAIN toolchain..."
+        rustup target add wasm32-unknown-unknown --toolchain "$NEAR_RUST_TOOLCHAIN"
     fi
 }
 
@@ -44,7 +41,7 @@ cargo fmt
 
 # Build the contract
 echo "Building contract..."
-RUSTFLAGS="-Z unstable-options" cargo +nightly near build non-reproducible-wasm --no-abi
+NEAR_RUST_TOOLCHAIN="$NEAR_RUST_TOOLCHAIN" ../build_wasm.sh . proxy_factory.wasm
 
 WASM_PATH="target/near/proxy_factory.wasm"
 

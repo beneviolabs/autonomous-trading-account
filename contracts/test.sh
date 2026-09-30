@@ -1,27 +1,23 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
 # Colors for output
 GREEN='\033[0;32m'
-RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 echo -e "${GREEN}Running Auth Proxy Contract Tests...${NC}"
-cargo test -- --nocapture
+cargo test --lib -- --nocapture
 echo ""
 
 echo -e "${GREEN}Running Factory Contract Tests...${NC}"
-cd factory
-cargo test -- --nocapture
+cargo test --manifest-path factory/Cargo.toml --lib -- --nocapture
 echo ""
 
 echo -e "${GREEN}Running Integration Tests...${NC}"
-cd ..
-cargo test integration_tests -- --nocapture
+./build_trading_account.sh
+cargo test --features integration-tests --lib integration_tests -- --nocapture
 
-# Check if any tests failed
-if [ $? -eq 0 ]; then
-    echo -e "${GREEN}All tests passed!${NC}"
-else
-    echo -e "${RED}Some tests failed!${NC}"
-    exit 1
-fi
+echo -e "${GREEN}All tests passed!${NC}"

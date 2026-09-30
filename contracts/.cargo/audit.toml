@@ -1,0 +1,6 @@
+[advisories]
+ignore = [
+    # time >= 0.3.47 needs Rust 1.88 (we pin 1.85.0). Only reached through the
+    # near-workspaces dev-dependency, never compiled into the contract wasm.
+    "RUSTSEC-2026-0009",
+]
