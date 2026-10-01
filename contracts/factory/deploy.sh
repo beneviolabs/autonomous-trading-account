@@ -1,21 +1,32 @@
 #!/bin/bash
 
-# Usage: ./deploy-factory.sh [FACTORY_OWNER] [GLOBAL_TRADING_ACCOUNT_BS58_HASH] [NETWORK]
-# Example: ./deploy-factory.sh testnet dao.peerfolio.testnet FTwNLjNXmku6hKVnXSP9Q9QmnwcTqzpG8dhFeoic5DsK
+# Deploys the factory contract (built by `make release`) to auth.peerfolio.<near|testnet>.
+#
+# Usage: ./deploy.sh <FACTORY_OWNER> <GLOBAL_TRADING_ACCOUNT_BS58_HASH> [NETWORK]
+# Example (how the live mainnet factory was deployed):
+#   ./deploy.sh peerfolio.sputnik-dao.near 6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f mainnet
+#
+# - First deploy: creates the factory account from peerfolio.<suffix> and calls `new`.
+#   NETWORK must be "mainnet" or "testnet". Needs peerfolio.<suffix>'s key in your keychain;
+#   a Ledger-secured root account won't work, so temporarily add a keychain full-access key
+#   to it, deploy, then delete that key.
+# - Later deploys: redeploy code only. FACTORY_OWNER and the hash are still required by the
+#   argument check but are NOT applied; use set_global_code_hash to change the hash.
+cd "$(dirname "$0")"
 
 
 # Validate required arguments
 if [ -z "$1" ]; then
     echo "Error: FACTORY_OWNER is required"
-    echo "Usage: ./deploy-factory.sh <FACTORY_OWNER> <GLOBAL_TRADING_ACCOUNT_BS58_HASH> <NETWORK> "
-    echo "Example: ./deploy-factory.sh dao.peerfolio.testnet FTwNLjNXmku6hKVnXSP9Q9QmnwcTqzpG8dhFeoic5DsK"
+    echo "Usage: ./deploy.sh <FACTORY_OWNER> <GLOBAL_TRADING_ACCOUNT_BS58_HASH> <NETWORK> "
+    echo "Example: ./deploy.sh peerfolio.sputnik-dao.near 6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f mainnet"
     exit 1
 fi
 
 if [ -z "$2" ]; then
     echo "Error: GLOBAL_TRADING_ACCOUNT_BS58_HASH is required"
-    echo "Usage: ./deploy-factory.sh <FACTORY_OWNER> <GLOBAL_TRADING_ACCOUNT_BS58_HASH> <NETWORK>"
-    echo "Example: ./deploy-factory.sh dao.peerfolio.testnet FTwNLjNXmku6hKVnXSP9Q9QmnwcTqzpG8dhFeoic5DsK"
+    echo "Usage: ./deploy.sh <FACTORY_OWNER> <GLOBAL_TRADING_ACCOUNT_BS58_HASH> <NETWORK>"
+    echo "Example: ./deploy.sh peerfolio.sputnik-dao.near 6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f mainnet"
     exit 1
 fi
 
@@ -29,7 +40,7 @@ echo "Using GLOBAL_TRADING_ACCOUNT_BS58_HASH: $GLOBAL_TRADING_ACCOUNT_BS58_HASH"
 
 # Set variables
 
-WASM_PATH="target/near/proxy_factory.wasm"
+WASM_PATH="../target/near/trading_account_factory/trading_account_factory.wasm"
 # Determine network suffix
 if [ "$NETWORK" = "mainnet" ]; then
     NETWORK_SUFFIX="near"

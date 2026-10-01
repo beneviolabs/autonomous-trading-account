@@ -1,14 +1,17 @@
 #!/bin/bash
+# DEV build of the factory into contracts/target/near/trading_account_factory/trading_account_factory.wasm.
+# Not for deployment: release builds are reproducible, run `make release` from the repo root.
 set -euo pipefail
+cd "$(dirname "$0")"
 
-NEAR_RUST_TOOLCHAIN="${NEAR_RUST_TOOLCHAIN:-1.85.0}"
+NEAR_RUST_TOOLCHAIN="$(sed -n 's/^channel = "\(.*\)"/\1/p' ../../rust-toolchain.toml)"
 
 
 # Check required tools
 check_requirements() {
     # Check if NEAR CLI is installed
     if ! command -v near &> /dev/null; then
-        echo "NEAR CLI is not installed. Please install it first with: npm install -g near-cli"
+        echo "near CLI is not installed. Install near-cli-rs: https://github.com/near/near-cli-rs"
         exit 1
     fi
 
@@ -32,18 +35,14 @@ check_requirements() {
 # Run requirement checks
 check_requirements
 
-# Clear previous builds
-echo "Clearing previous builds..."
-cargo clean
-
 echo "Running cargo formatter "
 cargo fmt
 
 # Build the contract
 echo "Building contract..."
-NEAR_RUST_TOOLCHAIN="$NEAR_RUST_TOOLCHAIN" ../build_wasm.sh . proxy_factory.wasm
+../../scripts/build-wasm.sh .
 
-WASM_PATH="target/near/proxy_factory.wasm"
+WASM_PATH="../target/near/trading_account_factory/trading_account_factory.wasm"
 
 # Verify WASM magic header after optimization
 echo "Verifying WASM header..."

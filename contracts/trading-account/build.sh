@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# DEV build of the trading account into contracts/target/near/trading_account/trading_account.wasm.
+# Not for deployment: release builds are reproducible, run `make release` from the repo root.
 set -euo pipefail
 
 # near-sandbox currently accepts contract wasm produced by Rust 1.86 or older.
@@ -10,4 +12,4 @@ cd "$SCRIPT_DIR"
 echo "Running cargo formatter "
 cargo fmt
 
-./build_wasm.sh . proxy_contract.wasm
+../../scripts/build-wasm.sh .

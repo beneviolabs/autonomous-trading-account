@@ -1,13 +1,5 @@
 **/.vscode/
 **/bin/
 **/.env
-**/.venv
-**/lib/
 **/target/
 .DS_Store
-node_modules
-*.pyc
-.next
-bun.lockb
-pnpm-lock.yaml
-0.0.1/metadata.json

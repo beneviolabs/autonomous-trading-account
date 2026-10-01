@@ -1593,9 +1593,9 @@ dependencies = [
 
 [[package]]
 name = "near-contract-standards"
-version = "5.18.1"
+version = "5.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ffac7ed9cb8466192092745025773e8f7fd4081076b24a5dcb456bde3001463"
+checksum = "deeee26550aaf4b670eab42e56bd1f329a29759d26424db5a97a9277eb27fa3f"
 dependencies = [
  "near-sdk",
 ]
@@ -1800,9 +1800,9 @@ checksum = "2dc45bb3760350de7f957c11827e1e20c5a4aff8d95d19fd2c0c492d795bfb02"
 
 [[package]]
 name = "near-sdk"
-version = "5.18.1"
+version = "5.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab0fa9255055e9715ff7c4bffc819772ed757af13a2583dbdbd982db897b4769"
+checksum = "29b8a870f6bfe533f2f5b35f6f1fb1a818105de80b2de6c0d78000f78729e4cc"
 dependencies = [
  "base64 0.22.1",
  "borsh",
@@ -1821,15 +1821,14 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
- "serde_with",
  "wee_alloc",
 ]
 
 [[package]]
 name = "near-sdk-macros"
-version = "5.18.1"
+version = "5.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c349917f79b2df2a94eff6409fc74722918e471835cb62edd0eb084f4ea7feb"
+checksum = "342e608e586394911a799adb2536e3ac93c45e83cc472acdc882f603c18b6046"
 dependencies = [
  "Inflector",
  "darling 0.20.11",
@@ -2246,29 +2245,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5ee95bc4ef87b8d5ba32e8b7714ccc834865276eab0aed5c9958d00ec45f49e8"
 dependencies = [
  "unicode-ident",
-]
-
-[[package]]
-name = "proxy-contract"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "borsh",
- "borsh-derive",
- "bs58 0.5.1",
- "hex",
- "near-account-id",
- "near-contract-standards",
- "near-gas",
- "near-sdk",
- "near-workspaces",
- "omni-transaction",
- "once_cell",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
 ]
 
 [[package]]
@@ -2741,7 +2717,6 @@ version = "1.0.145"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "402a6f66d8c709116cf22f558eab210f5a50187f702eb4d7e5ef38d9a7f1c79c"
 dependencies = [
- "indexmap 2.12.1",
  "itoa",
  "memchr",
  "ryu",
@@ -3359,6 +3334,38 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a04e24fab5c89c6a36eb8558c9656f30d81de51dfa4d3b45f26b21d61fa0a6c"
 dependencies = [
  "once_cell",
+]
+
+[[package]]
+name = "trading-account"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "borsh",
+ "borsh-derive",
+ "bs58 0.5.1",
+ "hex",
+ "near-account-id",
+ "near-contract-standards",
+ "near-gas",
+ "near-sdk",
+ "near-workspaces",
+ "omni-transaction",
+ "once_cell",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+]
+
+[[package]]
+name = "trading-account-factory"
+version = "0.1.0"
+dependencies = [
+ "bs58 0.5.1",
+ "hex",
+ "near-sdk",
 ]
 
 [[package]]

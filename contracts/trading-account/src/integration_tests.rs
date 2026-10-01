@@ -6,14 +6,15 @@ mod contract_tests {
     use near_workspaces::{Account, Contract, DevNetwork, Worker, operations::Function};
     use serde_json::json;
 
-    const WASM_FILEPATH: &[u8] = include_bytes!("target/near/proxy_contract.wasm");
+    const WASM_FILEPATH: &[u8] =
+        include_bytes!("../../target/near/trading_account/trading_account.wasm");
 
     async fn init(worker: &Worker<impl DevNetwork>) -> Result<(Contract, Account)> {
-        let proxy_contract = worker.dev_deploy(WASM_FILEPATH).await?;
-        let owner = proxy_contract.as_account();
+        let trading_account = worker.dev_deploy(WASM_FILEPATH).await?;
+        let owner = trading_account.as_account();
 
         // Initialize the contract
-        let _result = proxy_contract
+        let _result = trading_account
             .call("new")
             .args_json(json!({
                 "owner_id": owner.id(),
@@ -22,11 +23,11 @@ mod contract_tests {
             .transact()
             .await?;
 
-        Ok((proxy_contract.clone(), owner.clone()))
+        Ok((trading_account.clone(), owner.clone()))
     }
 
     #[tokio::test]
-    async fn proxy_contract_initialization() -> Result<()> {
+    async fn trading_account_initialization() -> Result<()> {
         let worker = near_workspaces::sandbox().await?;
         let (contract, owner) = init(&worker).await?;
 

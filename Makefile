@@ -1,44 +1,45 @@
-.PHONY: docker-build docker-run docker-test docker-clean help
+.PHONY: release build fmt-check clippy test-unit test audit help
 
-# Build contracts with the Rust version supported by near-sandbox/nearcore.
-NEAR_RUST_TOOLCHAIN ?= 1.85.0
+# Packages are checked one at a time: the two contracts enable different near-sdk features,
+# and a --workspace invocation would unify them.
+PACKAGES = trading-account trading-account-factory
 
-# Docker commands for faster CI actions
-docker-build:
-	docker build -t near-contract-builder .
+# Reproducible release build of both contracts in NEAR's pinned Docker image (see
+# [package.metadata.near.reproducible_build] in each Cargo.toml). Needs Docker and a clean,
+# committed git tree. These hashes are the ones to deploy and to put in DAO proposals.
+release:
+	cd contracts/trading-account && cargo near build reproducible-wasm
+	cd contracts/factory && cargo near build reproducible-wasm
 
-docker-test:
-	docker run --rm -v $(PWD):/workspace -w /workspace near-contract-builder bash -c "cd contracts && ./test-docker.sh"
+# Fast native dev builds. Never deploy these.
+build:
+	./scripts/build-wasm.sh contracts/trading-account
+	./scripts/build-wasm.sh contracts/factory
 
-docker-fmt-check:
-	docker run --rm -v $(PWD):/workspace -w /workspace near-contract-builder bash -c "cd contracts && cargo fmt -- --check"
+fmt-check:
+	cd contracts && cargo fmt --all -- --check
 
-docker-clippy:
-	docker run --rm -v $(PWD):/workspace -w /workspace near-contract-builder bash -c "cd contracts && cargo clippy -- -D warnings"
+# The factory is excluded until its redundant `use bs58;` is removed.
+clippy:
+	cd contracts && cargo clippy -p trading-account -- -D warnings
 
-docker-audit:
-	docker run --rm -v $(PWD):/workspace -w /workspace near-contract-builder bash -c "cd contracts && cargo audit && cd factory && cargo audit"
+test-unit:
+	cd contracts && for p in $(PACKAGES); do cargo test -p $$p --lib || exit 1; done
 
-# Build contracts with the same script used locally, so the wasm hashes match.
-docker-build-contracts:
-	docker run --rm -v $(PWD):/workspace -w /workspace near-contract-builder bash -c "cd contracts && NEAR_RUST_TOOLCHAIN=$(NEAR_RUST_TOOLCHAIN) ./build_wasm.sh . proxy_contract.wasm && NEAR_RUST_TOOLCHAIN=$(NEAR_RUST_TOOLCHAIN) ./build_wasm.sh factory proxy_factory.wasm"
+# Unit + sandbox integration tests.
+test:
+	./scripts/test.sh
 
-docker-clean:
-	docker system prune -f
-	docker volume prune -f
-
-# Local Debugging of Docker container
-local-docker-run:
-	docker run --rm -it -v $(PWD):/workspace -w /workspace near-contract-builder bash
-
+# Ignores (with reasons) are in contracts/.cargo/audit.toml.
+audit:
+	cd contracts && cargo audit
 
 help:
 	@echo "Available commands:"
-	@echo "  docker-build          - Build the Docker image"
-	@echo "  docker-test           - Run tests in Docker"
-	@echo "  docker-build-contracts - Build contracts in Docker"
-	@echo "  docker-fmt-check      - Check code formatting in Docker"
-	@echo "  docker-clippy         - Run clippy lints in Docker"
-	@echo "  docker-audit          - Run security audit in Docker"
-	@echo "  docker-clean          - Clean Docker system and volumes"
-	@echo "  local-docker-run      - Run interactive Docker container"
+	@echo "  release    - Reproducible release build of both contracts (Docker, clean git tree)"
+	@echo "  build      - Fast native dev build of both contracts (not for deployment)"
+	@echo "  fmt-check  - Check formatting"
+	@echo "  clippy     - Run clippy lints"
+	@echo "  test-unit  - Unit tests for both contracts"
+	@echo "  test       - Unit + integration tests"
+	@echo "  audit      - cargo audit of the workspace lockfile"

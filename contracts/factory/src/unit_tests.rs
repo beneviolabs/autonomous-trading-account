@@ -64,7 +64,7 @@ mod tests {
     }
 
     #[test]
-    fn test_proxy_code_hash() {
+    fn test_global_code_hash() {
         let context = get_context(accounts(1), "factory.testnet".parse().unwrap(), None);
         testing_env!(context.build());
 
@@ -83,7 +83,7 @@ mod tests {
     }
 
     #[test]
-    fn test_successful_proxy_creation() {
+    fn test_successful_trading_account_creation() {
         let mut contract = factory();
         testing_env!(get_context(
             ALICE.parse().unwrap(),
@@ -99,7 +99,7 @@ mod tests {
     }
 
     #[test]
-    fn test_proxy_creation_refund() {
+    fn test_trading_account_creation_refund() {
         let context = get_context(accounts(1), "factory.testnet".parse().unwrap(), None);
         testing_env!(context.build());
 

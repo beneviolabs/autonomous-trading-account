@@ -1,24 +1,24 @@
 [package]
-name = "proxy-factory"
+name = "trading-account-factory"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.85.0"
 license = "MIT"
+repository = "https://github.com/beneviolabs/autonomous-trading-account"
+
+[package.metadata.near.reproducible_build]
+# Official NEAR build image, pinned by digest. Keep both crates' values identical.
+image = "sourcescan/cargo-near:0.16.0-rust-1.86.0"
+image_digest = "sha256:3220302ebb7036c1942e772810f21edd9381edf9a339983da43487c77fbad488"
+passed_env = []
+container_build_command = ["cargo", "near", "build", "non-reproducible-wasm", "--locked", "--no-abi"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
-name = "proxy_factory"
-path = "factory.rs"
+name = "trading_account_factory"
+path = "src/lib.rs"
 
 [dependencies]
 near-sdk = { version = "5.17.2", features = ["unit-testing", "unstable", "global-contracts"] }
 hex = "0.4.3"
 bs58 = "0.5"
-
-[profile.release]
-codegen-units = 1
-opt-level = "z"
-lto = true
-debug = false
-panic = "abort"
-overflow-checks = true

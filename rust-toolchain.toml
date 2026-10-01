@@ -1,5 +1,7 @@
+# Matches the Rust in the release image (sourcescan/cargo-near:*-rust-1.86.0 in each Cargo.toml).
+# near-sandbox rejects wasm from Rust >= 1.87.
 [toolchain]
-channel = "1.85.0"
+channel = "1.86.0"
 targets = ["wasm32-unknown-unknown"]
 components = ["rustfmt", "clippy", "rust-analyzer"]
 profile = "minimal"
