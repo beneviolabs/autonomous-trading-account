@@ -12,18 +12,19 @@
 #   to it, deploy, then delete that key.
 # - Later deploys: redeploy code only. FACTORY_OWNER and the hash are still required by the
 #   argument check but are NOT applied; use set_global_code_hash to change the hash.
+set -euo pipefail
 cd "$(dirname "$0")"
 
 
 # Validate required arguments
-if [ -z "$1" ]; then
+if [ -z "${1:-}" ]; then
     echo "Error: FACTORY_OWNER is required"
     echo "Usage: ./deploy.sh <FACTORY_OWNER> <GLOBAL_TRADING_ACCOUNT_BS58_HASH> <NETWORK> "
     echo "Example: ./deploy.sh peerfolio.sputnik-dao.near 6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f mainnet"
     exit 1
 fi
 
-if [ -z "$2" ]; then
+if [ -z "${2:-}" ]; then
     echo "Error: GLOBAL_TRADING_ACCOUNT_BS58_HASH is required"
     echo "Usage: ./deploy.sh <FACTORY_OWNER> <GLOBAL_TRADING_ACCOUNT_BS58_HASH> <NETWORK>"
     echo "Example: ./deploy.sh peerfolio.sputnik-dao.near 6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f mainnet"
@@ -97,7 +98,7 @@ fi
 
 # Get deployed contract code hash
 echo "Fetching deployed contract hash..."
-DEPLOYED_HASH=$(near state "$FACTORY_ACCOUNT" | grep "Contract (SHA-256 checksum hex)" | awk '{print $NF}')
+DEPLOYED_HASH=$(near state "$FACTORY_ACCOUNT" | grep "Contract (SHA-256 checksum hex)" | awk '{print $NF}' || true)
 
 if [ -z "$DEPLOYED_HASH" ]; then
     echo "❌ Failed to fetch deployed contract hash"

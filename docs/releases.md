@@ -59,10 +59,13 @@ Step 1 of both releases.
 
 1. Find the CI run for the commit you're releasing. Mainnet releases use a commit on `main`, from a run whose event is `push` or `workflow_dispatch`; check that it succeeded.
    ```bash
-   export COMMIT=<release commit>
-   gh run list --workflow contracts.yml --commit $COMMIT --json databaseId,event,conclusion
+   export COMMIT=<full release commit SHA>
+   gh run list --workflow contracts.yml --commit $COMMIT --json databaseId,headSha,event,conclusion
    ```
-   If there's none, start one: `gh workflow run contracts.yml --ref main`. For a testnet rehearsal of unmerged code, start one on the branch instead (`--ref <branch>`).
+   If there's none, start one. A manual run builds the head of the ref you give it, so give it a ref that points at `$COMMIT`: `--ref main` if `$COMMIT` is `main`'s head, otherwise a tag (`git tag release-<name> $COMMIT && git push origin release-<name>`, then `--ref release-<name>`). For a testnet rehearsal of unmerged code, use the branch. Before downloading, check the run's `headSha` is `$COMMIT`:
+   ```bash
+   gh run view <run id> --json headSha,event,conclusion
+   ```
 2. Download the wasms in place of any local builds:
    ```bash
    rm -rf contracts/target/near

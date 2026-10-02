@@ -142,6 +142,7 @@ mod contract_tests {
                 "contract_id": "wrap.testnet",
                 "actions_json": "[{\"type\":\"FunctionCall\", \"deposit\": \"50000000000000000000000\", \"gas\": \"300000000000000\", \"method_name\": \"near_deposit\", \"args\": \"\"}]",
                 "nonce": "1",
+                // bs58 for 32 zero bytes, the block hash unsigned_tx used above.
                 "block_hash": "11111111111111111111111111111111",
                 "mpc_signer_pk":"ed25519:asdf".to_string(),
                 "derivation_path": "agent.auth-factory.appaccount.testnet".to_string(),

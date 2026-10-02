@@ -64,11 +64,13 @@ jobs:
       - name: Contract size check
         run: |
           MAX_SIZE=4194304
-          SIZE=$(stat -c%s contracts/target/near/trading_account/trading_account.wasm)
-          if [ "$SIZE" -gt "$MAX_SIZE" ]; then
-            echo "Contract size $SIZE exceeds NEAR limit $MAX_SIZE"
-            exit 1
-          fi
+          for wasm in contracts/target/near/*/*.wasm; do
+            SIZE=$(stat -c%s "$wasm")
+            if [ "$SIZE" -gt "$MAX_SIZE" ]; then
+              echo "$wasm is $SIZE bytes, over NEAR's $MAX_SIZE limit"
+              exit 1
+            fi
+          done
 
       # Release builds: pushes to main, plus manual runs (use a manual run on a
       # branch only for testnet rehearsals). Mainnet releases come from main.

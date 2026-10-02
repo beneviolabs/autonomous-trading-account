@@ -50,7 +50,8 @@ pub fn unsigned_tx(
     (tx, tx_json)
 }
 
-/// The transaction JSON request_signature passes to sign_request_callback.
+/// The transaction JSON request_signature passes to sign_request_callback. Mirrors the deposit
+/// extraction in `TradingAccountContract::request_signature`; keep the two in step.
 pub fn callback_json(
     contract: &TradingAccountContract,
     tx: &NearTransaction,

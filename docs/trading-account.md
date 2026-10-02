@@ -88,7 +88,7 @@ Deleting the account returns only its native NEAR. First withdraw wNEAR, intents
    ```bash
    near contract call-function as-transaction $TA add_full_access_key json-args '{"public_key":"<your public key>"}' prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' sign-as $OWNER network-config testnet sign-with-access-key-file $OWNER_KEY send
    ```
-2. Delete the trading account with that key, sending the remaining NEAR to the owner:
+2. Delete the trading account with that key, sending the remaining NEAR to the owner. It prompts for the key pair you added in step 1:
    ```bash
-   near account delete-account $TA beneficiary $OWNER network-config testnet sign-with-plaintext-private-key
+   near account delete-account $TA beneficiary $OWNER network-config testnet sign-with-plaintext-private-key send
    ```

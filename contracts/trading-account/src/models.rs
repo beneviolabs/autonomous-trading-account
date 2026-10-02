@@ -50,6 +50,7 @@ pub struct NearTransaction {
     pub signer_id: AccountId,
     /// A public key of the access key which was used to sign an account.
     /// Access key holds permissions for calling certain kinds of actions.
+    // omni renames this under its `serde` feature, which Cargo.toml always enables.
     #[serde(rename = "public_key")]
     pub signer_public_key: PublicKey,
     /// Nonce is used to determine order of transaction in the pool.
