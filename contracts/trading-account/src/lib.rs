@@ -20,7 +20,7 @@ use omni_transaction::{
     NEAR,
     near::types::{
         Action as OmniAction, BlockHash as OmniBlockHash,
-        FunctionCallAction as OmniFunctionCallAction, Signature, U64 as OmniU64, U128 as OmniU128,
+        FunctionCallAction as OmniFunctionCallAction, Signature, U128 as OmniU128,
     },
 };
 
@@ -36,6 +36,8 @@ mod actions;
 mod integration_tests;
 mod models;
 mod serializer;
+#[cfg(test)]
+mod test_support;
 mod unit_tests;
 mod utils;
 
@@ -199,8 +201,8 @@ impl TradingAccountContract {
                     Ok(OmniAction::FunctionCall(Box::new(OmniFunctionCallAction {
                         method_name,
                         args: args_bytes,
-                        gas: OmniU64(gas_u64.into()),
-                        deposit: safe_deposit.0.into(),
+                        gas: NearGas::from_gas(gas_u64.0),
+                        deposit: NearToken::from_yoctonear(safe_deposit.0),
                     })))
                 }
                 ActionString::Transfer { deposit } => {
@@ -210,7 +212,7 @@ impl TradingAccountContract {
                     let safe_deposit = SafeU128(deposit_near.as_yoctonear());
                     Ok(OmniAction::Transfer(
                         omni_transaction::near::types::TransferAction {
-                            deposit: safe_deposit.0.into(),
+                            deposit: NearToken::from_yoctonear(safe_deposit.0),
                         },
                     ))
                 }
@@ -335,8 +337,8 @@ impl TradingAccountContract {
         let deposits: Vec<OmniU128> = omni_actions
             .iter()
             .map(|action| match action {
-                OmniAction::FunctionCall(call) => call.deposit.clone(),
-                OmniAction::Transfer(transfer) => transfer.deposit.clone(),
+                OmniAction::FunctionCall(call) => OmniU128(call.deposit.as_yoctonear()),
+                OmniAction::Transfer(transfer) => OmniU128(transfer.deposit.as_yoctonear()),
                 _ => OmniU128(0),
             })
             .collect();
@@ -492,10 +494,7 @@ impl TradingAccountContract {
             Signature::SECP256K1(Secp256K1Signature(signature_bytes))
         };
 
-        near_sdk::env::log_str(&format!(
-            "constructed omni signature: {:?}",
-            &omni_signature
-        ));
+        near_sdk::env::log_str(&format!("constructed omni signature: {:?}", omni_signature));
 
         // Add signature to transaction
         let near_tx_signed = near_tx.build_with_signature(omni_signature);

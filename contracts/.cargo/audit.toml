@@ -1,6 +1,9 @@
 [advisories]
 ignore = [
-    # time >= 0.3.47 needs Rust 1.88 (we pin 1.85.0). Only reached through the
-    # near-workspaces dev-dependency, never compiled into the contract wasm.
-    "RUSTSEC-2026-0009",
+    # rustls < 0.23.45 (TLS 1.3 handshake messages accepted across encryption levels). Only reached
+    # through the near-workspaces / near-sandbox dev-dependencies (test RPC and sandbox download),
+    # never compiled into the contract wasm. Can't upgrade yet: near-crypto 0.37.4 (via near-sdk
+    # 5.29.1) pins aws-lc-rs =1.16.2, which caps rustls at 0.23.43. Remove once near-sdk moves to
+    # near-crypto 0.38.
+    "RUSTSEC-2026-0285",
 ]

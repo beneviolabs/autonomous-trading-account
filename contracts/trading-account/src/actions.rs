@@ -35,13 +35,13 @@ impl NearAction {
             )));
         }
         // Check if method is allowed
-        if let Some(method) = &self.method_name {
-            if !ALLOWED_METHODS.contains(&method.as_str()) {
-                return Err(ActionValidationError::MethodNotAllowed(format!(
-                    "Method {} is restricted. Allowed methods: {:?}",
-                    method, ALLOWED_METHODS
-                )));
-            }
+        if let Some(method) = &self.method_name
+            && !ALLOWED_METHODS.contains(&method.as_str())
+        {
+            return Err(ActionValidationError::MethodNotAllowed(format!(
+                "Method {} is restricted. Allowed methods: {:?}",
+                method, ALLOWED_METHODS
+            )));
         }
         Ok(())
     }

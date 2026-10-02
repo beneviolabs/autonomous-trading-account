@@ -1,185 +1,66 @@
-#### MPC Secured Agent Autonomy
+# Autonomous Trading Account
 
-1. [The limited access autonomous trading account](https://github.com/beneviolabs/ft-allowance-agent/blob/main/contracts/auth_proxy.rs) manages authorized users for signature requests, allows one to transfer tokens to their trading account and grant an AI agent (i.e any other Near Account) permission to call this proxy contract to request MPC approval to send transactions to a predefined set of contracts and methods (i.e. ft_transfer_call on intents.near). Thereby allowing an Agentic account to act autonomously on your behalf with restricted permissions and access only to the tokens that you transfer to your trading account. The system consists of two main contracts:
-    1. Factory Contract (factory.rs):
+NEAR smart contracts that give an AI agent **limited, revocable** authority to trade on a user's behalf, using only the funds the user moves into a dedicated account.
 
-    - Acts as a proxy contract deployer
-    - Stores proxy code hash for verification
-    - Creates proxy instances with proper initialization (see below for example)
-    - Ensures secure deployment with minimum deposit requirements
-    - Only accepts NEAR implicit owners (64 lowercase hex chars), and only the owner can create its own trading account
-    - Names the trading account `implicit_<first 24 hex of sha256(first 32 chars of owner_id)>.<factory>`; call `get_base_account_name` to get it
-    Example usage: `near call auth.peerfolio.testnet deposit_and_create_proxy_global \
-  '{"owner_id": "<64-hex implicit account>"}' \
-  --accountId <64-hex implicit account> \
-  --deposit 0.12`
+- The **factory** ([`contracts/factory`](contracts/factory)) creates one trading account per user.
+- The **trading account** ([`contracts/trading-account`](contracts/trading-account)) holds the funds the agent may trade with. Agents it authorizes can get transactions signed by NEAR's MPC signer, but only to allowlisted contracts and methods.
 
-    2. Auth Proxy Contract (auth_proxy.rs):
-
-    - Manages authorized users for signature requests
-    - Handles MPC signature generation for approved transactions
-    - Restricts contract interactions to predefined set (wrap.near, intents.near)
-    - Supports specific methods (near_deposit, add_public_key, etc.)
-    Example usage: `near call implicit_<24hex>.auth.peerfolio.testnet request_signature \
-  '{...signature_args...}' \
-  --accountId authorized-agent.testnet`
-
-### Onboarding sequence
-
-These are all the various components that interact during a user's onboarding.
-
-  ```mermaid
-sequenceDiagram
-    autonumber
-    participant Wallet as NEAR (& Wallet) <br> (crypto-native wallet<br>user.near)
-    participant User as User <br> (Browser)
-    participant ProxyFac as Proxy Factory <br>(ProxyFactory contract<br>auth.peerfolio.near)
-    participant TradingAcc as Proxy/Trading Account <br>(implicit_<24hex>.auth.peerfolio.near)
-    participant MPC as MPC Contract
-
-    User->>Wallet: Connect wallet
-    Wallet->>User: Function call key for <br> auth.peerfolio.near <br> (limited access)
-    critical Approve txn
-        User->>Wallet: (deposit_and_create_proxy_global) <br> w/ 0.004 Ⓝ
-    option no balance
-        Wallet--xUser: TBD
-    option timeout/browser window closed
-        Wallet-->User: TBD
-    end
-    critical deposit_and_create_proxy_global()
-        Wallet->>ProxyFac: deposit_and_create_proxy_global()
-        ProxyFac->>TradingAcc: i. create proxy account<br>ii. transfer deposit<br>iii.deploy AuthProxy contract<br>iv. call AuthProxy.new to<br> set authorized user (user.near) <br> and MPC signer (v1.signer))
-    option trading acc already exists
-        ProxyFac-->User: error message
-    option other error
-        ProxyFac--xWallet: Refund 0.004 Ⓝ
-    end
-
-    critical MPC key registration
-        User->>MPC: derive MPC public key for trading account
-        User->>Wallet: Approve add MPC key + <br> authorized user (peerfolio.near) txn
-        Wallet->>TradingAcc: MPC key with full access is set
-    option service unavailable
-        MPC--xUser: Retry flow
-    option user rejects txn
-        Wallet--xUser: error message
-    end
-  ```
-
-Examples
-  - Approve txn: https://testnet.nearblocks.io/txns/CF1ainGjroxtppNTWWkFgQsiC5kC4iJ3X7v8FgLMrWDE?tab=execution
-  - deposit and create proxy: https://testnet.nearblocks.io/txns/CF1ainGjroxtppNTWWkFgQsiC5kC4iJ3X7v8FgLMrWDE?tab=execution#GV1aG4CqY6Lm2L28yb3tdinD2vZ7mZRS8fvPfBzahcnp
-  - MPC key registration: https://testnet.nearblocks.io/txns/5Jyn459DhAaRxEqvTo3x724cgxCpjTH1Jaoc7uyVNQt9
-
-### Agent execution sequence (swaps etc.)
-
-This sequence shows how an agentic process uses the proxy trading account to autonomously execute transactions on behalf of the user.
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Agent as Agentic Process <br> (authorized-agent.near)
-    participant User as Trading Contract Owner <br> (user.near)
-    participant Proxy as Proxy/Trading Account <br>(implicit_<24hex>.auth.peerfolio.near)
-    participant MPC as MPC Contract <br>(v1.signer-prod.near)
-    participant Target as Target Contract <br>(wrap.near / intents.near)
-    participant NEAR as NEAR Protocol
-
-    Note over Agent,NEAR: Agent is pre-authorized by user via add_authorized_user()
-    User->>Agent: User has already set the market conditions which should trigger the agentic actions.
-
-    Agent->>Agent: Analyze market conditions<br/>Decide to execute trade
-    Agent->>NEAR: Get latest block hash & nonce
-    NEAR-->>Agent: block_hash, nonce
-
-    Agent->>Proxy: request_signature(<br/>contract_id: "wrap.near",<br/>actions_json: '[{"type":"FunctionCall",...}]',<br/>nonce, block_hash,<br/>mpc_signer_pk, derivation_path)
-
-    Note over Proxy: Validate: Is agent authorized?
-    Proxy->>Proxy: Check authorized_users.contains(agent)
-
-    Note over Proxy: Validate: Is action allowed?
-    Proxy->>Proxy: validate_and_build_actions()<br/>✓ Contract in allowlist<br/>✓ Method in allowlist<br/>✓ Build OmniAction
-
-    Proxy->>Proxy: Build transaction with<br/>TransactionBuilder
-
-    Proxy->>Proxy: Hash transaction payload<br/>create_signature_request()
-
-    Proxy->>MPC: sign(request: {<br/>  payload_v2: {ecdsa: hex_hash},<br/>  path: derivation_path,<br/>  domain_id: 0<br/>})
-
-    Note over MPC: MPC generates ECDSA signature<br/>using derivation path
-
-    MPC-->>Proxy: SignatureResponse {<br/>  big_r, s, recovery_id<br/>}
-
-    Proxy->>Proxy: sign_request_callback()<br/>✓ Decode hex signature<br/>✓ Verify via ecrecover<br/>✓ Build signed transaction
-
-    Proxy-->>Agent: base64(signed_transaction)
-
-    Agent->>NEAR: broadcast_tx_commit(signed_tx)
-
-    NEAR->>Target: Execute: near_deposit / swap / etc.
-
-    Target-->>NEAR: Transaction result
-
-    NEAR-->>Agent: tx_hash, status
-
-    Note over Agent: Agent logs execution<br/>Updates strategy
+```
+owner ──create──▶ factory ──creates──▶ trading account
+agent ──request_signature──▶ trading account ──sign──▶ MPC signer
+agent ◀── signed transaction ──┘
+agent ──broadcast──▶ NEAR ──▶ wrap.near / intents.near (sent from the trading account)
 ```
 
-**Key Security Features:**
-- Agent must be pre-authorized via `add_authorized_user()`
-- Only specific contracts allowed: `wrap.near`, `intents.near`
-- Only specific methods allowed: `near_deposit`, `add_public_key`, etc.
-- MPC signature provides cryptographic security
-- All actions are logged on-chain for transparency
+## Deployments
 
-### Deleting a trading account
+| | Mainnet | Testnet |
+|---|---|---|
+| Factory | `auth.peerfolio.near` | `auth.peerfolio.testnet` |
+| Factory owner | `peerfolio.sputnik-dao.near` (DAO) | `peerfolio.peerfolio.testnet` |
+| Trading accounts | `implicit_<24hex>.auth.peerfolio.near` | `implicit_<24hex>.auth.peerfolio.testnet` |
+| Trading account code (global hash) | `6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f` | same |
+| MPC signer | `v1.signer` | `v1.signer-prod.testnet` |
+| Peerfolio agent | `bot.peerfolio.near` | none |
 
-1. Add your main account public key to the proxy account with full access permissions
-```
-near contract call-function as-transaction <trading-account-id> add_full_access_key json-args '{"public_key": "<main-account-public-key>"}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' sign-as <main-account-id> network-config testnet sign-with-keychain send
-```
+- The previous mainnet factory, `auth-v1.peerfolio.near`, was replaced in January 2026.
+- ft-core configures the factory as `AUTH_CREATOR` / `VITE_AUTH_CREATOR_*`, and the agent as `AGENT_ACCOUNT_ID` / `VITE_AGENT_ACCOUNT_ID_*`. Its operational runbooks are in [`runbook/scenarios/automation_agent_account`](https://github.com/beneviolabs/ft-core/tree/main/runbook/scenarios/automation_agent_account).
 
-2. Send a delete account transaction signing with your main account private key
-```
-near account delete-account <trading-account-id> beneficiary <main-account-id> network-config testnet sign-with-plaintext-private-key
-```
+## Terms
 
+- **Owner**: the user's NEAR implicit account (64 hex chars). It creates and controls its trading account.
+- **Authorized user**: an account, usually the agent, allowed to request signatures. At most 10 per trading account.
+- **MPC key**: the key NEAR's MPC signer derives for a trading account. It's added as a full-access key on the trading account and signs every agent transaction.
+- **Global code hash**: the hash of the trading account code deployed once as a [NEP-591 global contract](https://github.com/near/NEPs/blob/master/neps/nep-0591.md). The factory creates new trading accounts with it.
 
-#### Examples
-1. [This testnet txn](https://testnet.nearblocks.io/txns/Hi2pfe89tBdMN2oY2dFXLuHcSBVFotx6pHViDQuKUZDi) converting 1 Near to WNear by `agent.charleslavon.testnet` was initiated by `benevio-labs.testnet` who was pre-approved by auth_proxy.rs to use Near's MPC contract to [create a signature](https://testnet.nearblocks.io/txns/831u2KqbdtzvJti5HUhGnp4tZD7Q8onUzD11rwBjrAAm).
-2. [This mainnet txn](https://nearblocks.io/txns/GRw6oEWjAQ2QT9oDtsgBSRWr3s4oCW4A8zCpHCRXD62s) adding a public_key onto `intents.near` was initiated by `benevio-labs.near` who was pre-approved by auth_proxy.rs to [create an MPC signature](https://nearblocks.io/txns/9PJXbvcb4RMxjwK8VW4N54RnvrjENUCr6N1nv9f3DZJQ).
+Older code and method names say "proxy" for the trading account.
 
+## Docs
 
-#### Setup dependencies
-1. Install near-cli-rs
-2. Set your target network as an environment variable e.g. `export NEAR_ENV=testnet`
-3. Also add your factory account address and factory owner address into factory/deploy-factory.sh, e.g. `FACTORY_ACCOUNT="auth.peerfolio.$NETWORK"
-FACTORY_OWNER="peerfolio.$NETWORK"`
-4. Login with a near testnet account and choose to save the private key into your mac's keychain, `near login`
-5. Need tokens? Use a [Near testnet faucet](https://near-faucet.io/) to fund your account.
-6. Build and install rust tooling
+- [Trading account](docs/trading-account.md): security model, lifecycle with commands, and deleting an account.
+- [Factory](docs/factory.md): account naming and deploying a new factory.
+- [Builds and releases](docs/releases.md): release builds, what's deployed, and releasing either contract (including DAO proposals).
+- [Contract reference](docs/reference.md): methods, `request_signature` arguments and errors.
+- [Testing](docs/testing.md): local tests and CI.
 
-    ```bash
-    # The repository pins Rust 1.85.0 for near-sandbox-compatible wasm.
-    rustup toolchain install 1.85.0-aarch64-apple-darwin
-    rustup target add wasm32-unknown-unknown --toolchain 1.85.0-aarch64-apple-darwin
-    cd contracts && ./build_trading_account.sh
-    cd factory && ./deploy-factory.sh
-    ```
+## Development
 
-### Running tests
-
-The test script builds the proxy wasm with `cargo near` before enabling the sandbox integration
-tests. The test profile disables debug assertions because near-sdk's debug-only mock blockchain
-check aborts on some host toolchains, while retaining panic unwinding for `#[should_panic]` tests.
+Prerequisites:
+- rustup. `rust-toolchain.toml` pins Rust 1.97.1, and rustup installs it automatically.
+- cargo-near 0.22.0: `cargo install cargo-near --version 0.22.0 --locked`. The build scripts refuse other versions.
+- [near-cli-rs](https://github.com/near/near-cli-rs), tested with 0.22. Run `near login` for each account you'll sign as.
+- Docker, only to reproduce a release build locally. Releases normally use CI's build.
 
 ```bash
-cd contracts
-./test.sh
+scripts/test.sh   # unit and integration tests
+make release      # reproducible release build (CI runs it too)
+make help         # all targets
 ```
 
-#### Test Requesting Signatures
-1. Go to [NearBlocks](https://testnet.nearblocks.io/), on the upper right select the `Near Icon`, then `testnet`, then click into a `Latest Block` and copy the block hash.  Now you can simulate a program or agent using your proxy contract by requesting a signature, `./request_signature.sh <block hash> < add_key | deposit > <your-other-account.testnet>`
-2. If successful, transaction logs (view them in your terminal or on nearblocks.io) should display the Reconstructed Signature in base64 (scroll up or search for `Signed transaction (base64)`).  Pass this signature `./submit_txn.sh` to test broadcasting this testnet transaction. `./submit_txn.sh FAAAAGNoYXJsZXNsYXZvbi50ZXN0bmV0AQD1k+Pq3bhLFaNXClzgx0fEBmZItkkolypTJq0v0O6JOB856PxW5l+TZwD6MTrEBY+xsI/3wBgz2RNY+Ax5RETZq+2FlQEAAAwAAAB3cmFwLnRlc3RuZXQwRFzWCwWaY4pPFHl46Bj87dj6JLtdm28rjKf37iFc4QEAAAACDAAAAG5lYXJfZGVwb3NpdAAAAAAAoHJOGAkAAAAAAKHtzM4bwtMAAAAAAAAButebmlYXbKcuRM9NfWfgOAdR9jzGvS4Fv53T4/wOGjwwjizI0PvKnpaCpsxkNyTFZHQEVpYkCNPnUbabAYYx/QI=`
+The contracts form one Cargo workspace in `contracts/`, with a shared `Cargo.lock` and `target/`. To share code between them, add a library crate to the workspace that both depend on by path. Keep it to plain types; it must not define a `#[near]` contract. A good first candidate is the factory's `ProxyInitArgs`, which has to match the trading account's `new(owner_id, signer_id)`, and nothing checks that at compile time today.
 
+## Audits
 
+The contracts deployed at `*.peerfolio.near`, including the factory deployed in January 2026, have had independent third-party security reviews. All findings were remediated. Reports: [Peerfolio Security Audits](https://www.notion.so/Security-Audits-3037541592cc80709908c49fc7649260).
+
+Later changes aren't covered unless the reports say so. That includes the factory naming and owner checks from [PR #166](https://github.com/beneviolabs/autonomous-trading-account/pull/166), which came from an internal review, and the near-sdk 5.29 / omni-transaction 0.5 upgrade from [PR #168](https://github.com/beneviolabs/autonomous-trading-account/pull/168), which changes how the trading account builds the transactions it signs.

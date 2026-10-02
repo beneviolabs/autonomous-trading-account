@@ -1,5 +1,7 @@
+# Matches the Rust in the release image (sourcescan/cargo-near:*-rust-1.97.1 in each Cargo.toml).
+# Change both together. Rust >= 1.87 needs near-sdk >= 5.28 (see docs/releases.md#rust-version).
 [toolchain]
-channel = "1.85.0"
+channel = "1.97.1"
 targets = ["wasm32-unknown-unknown"]
 components = ["rustfmt", "clippy", "rust-analyzer"]
 profile = "minimal"

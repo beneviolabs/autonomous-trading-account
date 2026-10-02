@@ -60,11 +60,11 @@ mod tests {
             "testnet".to_string(),
             "EaFtguW8o7cna1k8EtD4SFfGNdivuCPhx2Qautn7J3Rz".to_string(),
         );
-        contract.deposit_and_create_proxy_global(ALICE.parse().unwrap());
+        let _ = contract.deposit_and_create_proxy_global(ALICE.parse().unwrap());
     }
 
     #[test]
-    fn test_proxy_code_hash() {
+    fn test_global_code_hash() {
         let context = get_context(accounts(1), "factory.testnet".parse().unwrap(), None);
         testing_env!(context.build());
 
@@ -83,7 +83,7 @@ mod tests {
     }
 
     #[test]
-    fn test_successful_proxy_creation() {
+    fn test_successful_trading_account_creation() {
         let mut contract = factory();
         testing_env!(get_context(
             ALICE.parse().unwrap(),
@@ -99,7 +99,7 @@ mod tests {
     }
 
     #[test]
-    fn test_proxy_creation_refund() {
+    fn test_trading_account_creation_refund() {
         let context = get_context(accounts(1), "factory.testnet".parse().unwrap(), None);
         testing_env!(context.build());
 
@@ -265,7 +265,7 @@ mod tests {
             None
         )
         .build());
-        contract.create_proxy_global("alice.near".parse().unwrap());
+        let _ = contract.create_proxy_global("alice.near".parse().unwrap());
     }
 
     #[test]
@@ -278,7 +278,7 @@ mod tests {
         )
         .build());
         // The same argument drives both the name and the owner.
-        contract.create_proxy_global(VICTIM.parse().unwrap());
+        let _ = contract.create_proxy_global(VICTIM.parse().unwrap());
         let logs = near_sdk::test_utils::get_logs();
         let expected_account = format!("{}.factory.testnet", base_name(&contract, VICTIM));
         assert!(logs[0].contains(&format!("Account: {}, Owner: {}", expected_account, VICTIM)));
@@ -294,7 +294,7 @@ mod tests {
             None
         )
         .build());
-        contract.create_proxy_global(VICTIM.parse().unwrap());
+        let _ = contract.create_proxy_global(VICTIM.parse().unwrap());
     }
 
     #[test]
@@ -307,7 +307,7 @@ mod tests {
             None
         )
         .build());
-        contract.deposit_and_create_proxy_global(VICTIM.parse().unwrap());
+        let _ = contract.deposit_and_create_proxy_global(VICTIM.parse().unwrap());
     }
 
     #[test]
@@ -319,7 +319,7 @@ mod tests {
             None
         )
         .build());
-        contract.deposit_and_create_proxy_global(ALICE.parse().unwrap());
+        let _ = contract.deposit_and_create_proxy_global(ALICE.parse().unwrap());
     }
 
     #[test]

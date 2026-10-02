@@ -1,4 +1,3 @@
-use bs58;
 use near_sdk::serde::Serialize;
 use near_sdk::{
     env, near, AccountId, Gas, NearToken, PanicOnDefault, Promise, PromiseError, PublicKey,
@@ -78,7 +77,10 @@ impl TradingAccountFactory {
         Promise::new(full_sub_account.clone())
             .create_account()
             .transfer(env::attached_deposit())
-            .use_global_contract(self.global_proxy_base58_hash.clone())
+            .use_global_contract(
+                <[u8; 32]>::try_from(self.global_proxy_base58_hash.clone())
+                    .expect("global code hash is 32 bytes"),
+            )
             .function_call(
                 "new".to_string(),
                 near_sdk::serde_json::to_vec(&ProxyInitArgs {
@@ -134,7 +136,7 @@ impl TradingAccountFactory {
             env::panic_str("owner_id must be a NEAR implicit account");
         }
 
-        let hash = env::sha256(account_str[..32].as_bytes());
+        let hash = env::sha256(&account_str.as_bytes()[..32]);
         format!("implicit_{}", hex::encode(&hash[..12]))
     }
 

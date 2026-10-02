@@ -1,0 +1,92 @@
+name: contracts
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - 'rust-toolchain.toml'
+      - 'scripts/**'
+      - 'Makefile'
+      - '.github/workflows/**'
+  pull_request:
+    branches: [ main, develop ]
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Installs the toolchain pinned in rust-toolchain.toml (with rustfmt + clippy).
+      - name: Install Rust
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contracts
+
+      - name: Install cargo-near
+        # Keep in sync with CARGO_NEAR_VERSION in scripts/build-wasm.sh.
+        run: curl --proto '=https' --tlsv1.2 -LsSf https://github.com/near/cargo-near/releases/download/cargo-near-v0.22.0/cargo-near-installer.sh | sh
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Run formatting check
+        run: make fmt-check
+
+      - name: Run clippy
+        run: make clippy
+
+      # Unit tests, then a dev build and the sandbox integration tests (neard downloads at runtime).
+      - name: Run tests
+        run: make test
+
+      - name: Security audit
+        run: make audit
+
+      - name: Build contracts (reproducible)
+        # Builds inside NEAR's pinned image (see [package.metadata.near.reproducible_build]).
+        # The printed hashes are reproducible by anyone with `make release` on this commit.
+        run: make release
+
+      - name: Contract size check
+        run: |
+          MAX_SIZE=4194304
+          for wasm in contracts/target/near/*/*.wasm; do
+            SIZE=$(stat -c%s "$wasm")
+            if [ "$SIZE" -gt "$MAX_SIZE" ]; then
+              echo "$wasm is $SIZE bytes, over NEAR's $MAX_SIZE limit"
+              exit 1
+            fi
+          done
+
+      # Release builds: pushes to main, plus manual runs (use a manual run on a
+      # branch only for testnet rehearsals). Mainnet releases come from main.
+      - name: Upload build artifacts
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: contract-wasm
+          path: |
+            contracts/target/near/trading_account/trading_account.wasm
+            contracts/target/near/trading_account_factory/trading_account_factory.wasm
+
+      - name: Dependency vulnerability scan
+        uses: actions/dependency-review-action@v4
+        if: github.event_name == 'pull_request'
+        with:
+          # rustls (RUSTSEC-2026-0285): test-only, and near-sdk 5.29.1 caps it below the fix.
+          # Mirrors contracts/.cargo/audit.toml.
+          allow-ghsas: GHSA-2mjx-qc3c-rqvc
