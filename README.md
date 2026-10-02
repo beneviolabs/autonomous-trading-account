@@ -63,4 +63,4 @@ The contracts form one Cargo workspace in `contracts/`, with a shared `Cargo.loc
 
 The contracts deployed at `*.peerfolio.near`, including the factory deployed in January 2026, have had independent third-party security reviews. All findings were remediated. Reports: [Peerfolio Security Audits](https://www.notion.so/Security-Audits-3037541592cc80709908c49fc7649260).
 
-Later changes aren't covered unless the reports say so. That includes the factory naming and owner checks from [PR #166](https://github.com/beneviolabs/autonomous-trading-account/pull/166), which came from an internal review.
+Later changes aren't covered unless the reports say so. That includes the factory naming and owner checks from [PR #166](https://github.com/beneviolabs/autonomous-trading-account/pull/166), which came from an internal review, and the near-sdk 5.29 / omni-transaction 0.5 upgrade from [PR #168](https://github.com/beneviolabs/autonomous-trading-account/pull/168), which changes how the trading account builds the transactions it signs.

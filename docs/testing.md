@@ -35,7 +35,7 @@ Gotchas:
 3. Runs `make release` (reproducible builds in NEAR's image), checks the trading account wasm is under 4 MiB, and uploads both wasms.
 
 - Run any step locally with `make <target>`; `make help` lists them.
-- `cargo audit` ignores are in `contracts/.cargo/audit.toml`, each with a reason. `RUSTSEC-2026-0285` (`rustls`) only reaches test dependencies and can't be fixed until near-sdk moves to near-crypto 0.38.
+- `cargo audit` ignores are in `contracts/.cargo/audit.toml`, each with a reason. `RUSTSEC-2026-0285` (`rustls`) only reaches test dependencies and can't be fixed until near-sdk moves to near-crypto 0.38. The dependency-review step in the workflow mirrors it.
 
 ## End-to-end on a live network
 

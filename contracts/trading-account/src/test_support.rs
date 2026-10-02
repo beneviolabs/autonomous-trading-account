@@ -46,7 +46,17 @@ pub fn unsigned_tx(
         .block_hash(BlockHash(block_hash))
         .actions(omni_actions.clone())
         .build();
-    let deposits: Vec<OmniU128> = omni_actions
+    let tx_json = callback_json(contract, &tx, &omni_actions);
+    (tx, tx_json)
+}
+
+/// The transaction JSON request_signature passes to sign_request_callback.
+pub fn callback_json(
+    contract: &TradingAccountContract,
+    tx: &NearTransaction,
+    actions: &[Action],
+) -> String {
+    let deposits: Vec<OmniU128> = actions
         .iter()
         .map(|action| match action {
             Action::FunctionCall(call) => OmniU128(call.deposit.as_yoctonear()),
@@ -54,9 +64,7 @@ pub fn unsigned_tx(
             _ => OmniU128(0),
         })
         .collect();
-    let tx_json =
-        contract.convert_deposits_to_strings(serde_json::to_string(&tx).unwrap(), &deposits);
-    (tx, tx_json)
+    contract.convert_deposits_to_strings(serde_json::to_string(tx).unwrap(), &deposits)
 }
 
 /// What the MPC signer returns for `tx`, and the signed transaction the callback should build.

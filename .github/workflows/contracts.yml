@@ -84,3 +84,7 @@ jobs:
       - name: Dependency vulnerability scan
         uses: actions/dependency-review-action@v4
         if: github.event_name == 'pull_request'
+        with:
+          # rustls (RUSTSEC-2026-0285): test-only, and near-sdk 5.29.1 caps it below the fix.
+          # Mirrors contracts/.cargo/audit.toml.
+          allow-ghsas: GHSA-2mjx-qc3c-rqvc

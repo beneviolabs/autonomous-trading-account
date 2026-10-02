@@ -821,10 +821,8 @@ mod tests {
     // breaks the JSON round trip fails here.
     #[test]
     fn test_transaction_bytes_unchanged() {
-        use crate::models;
-        use omni_transaction::near::types::{
-            Action, BlockHash, Secp256K1Signature, Signature, U128 as OmniU128,
-        };
+        use crate::{models, test_support};
+        use omni_transaction::near::types::{BlockHash, Secp256K1Signature, Signature};
         use omni_transaction::{NEAR, TransactionBuilder};
 
         let mut context = get_context(accounts(1));
@@ -865,16 +863,7 @@ mod tests {
         assert_eq!(hex::encode(tx.build_for_signing()), expected_for_signing);
 
         // Same round trip as request_signature -> sign_request_callback.
-        let deposits: Vec<OmniU128> = omni_actions
-            .iter()
-            .map(|action| match action {
-                Action::FunctionCall(call) => OmniU128(call.deposit.as_yoctonear()),
-                Action::Transfer(transfer) => OmniU128(transfer.deposit.as_yoctonear()),
-                _ => OmniU128(0),
-            })
-            .collect();
-        let tx_json =
-            contract.convert_deposits_to_strings(serde_json::to_string(&tx).unwrap(), &deposits);
+        let tx_json = test_support::callback_json(&contract, &tx, &omni_actions);
         let near_tx: models::NearTransaction = serde_json::from_str(&tx_json).unwrap();
         assert_eq!(
             hex::encode(near_tx.build_for_signing()),
