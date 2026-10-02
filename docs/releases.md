@@ -163,7 +163,7 @@ Use this for changes like bug fixes, gas tweaks and new view methods. A code-onl
 
 `auth.peerfolio.near` has no access keys, so on mainnet a council member adds a temporary key through the DAO, deploys with it, and then deletes it. On testnet, the `auth.peerfolio.testnet` key is in the keychain.
 
-> **TODO: deploy factory code without a temporary key.** For the length of a release, someone outside the DAO holds a full-access key to the factory, and nothing enforces that it's deleted afterwards. Instead, the factory could have an owner-only method that deploys the wasm passed to it onto its own account. Sputnik DAO already supports this: `store_blob` uploads the wasm to the DAO, and an `UpgradeRemote` proposal calls that method with it once approved. The factory would never need an access key. That's a factory code change, so it needs review, and the first release that adds the method still has to go out this way.
+> **TODO: deploy factory code without a temporary key.** For the length of a release, one council member alone holds a full-access key to the factory, outside the DAO's 3-of-4 approval, and nothing enforces that it's deleted afterwards. Instead, the factory could have an owner-only method that deploys the wasm passed to it onto its own account. Sputnik DAO already supports this: `store_blob` uploads the wasm to the DAO, and an `UpgradeRemote` proposal calls that method with it once approved. The factory would never need an access key. That's a factory code change, so it needs review, and the first release that adds the method still has to go out this way.
 
 ### Step 1: Get the release build
 
