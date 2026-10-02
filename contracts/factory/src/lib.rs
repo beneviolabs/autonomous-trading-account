@@ -1,4 +1,3 @@
-use bs58;
 use near_sdk::serde::Serialize;
 use near_sdk::{
     env, near, AccountId, Gas, NearToken, PanicOnDefault, Promise, PromiseError, PublicKey,
@@ -137,7 +136,7 @@ impl TradingAccountFactory {
             env::panic_str("owner_id must be a NEAR implicit account");
         }
 
-        let hash = env::sha256(account_str[..32].as_bytes());
+        let hash = env::sha256(&account_str.as_bytes()[..32]);
         format!("implicit_{}", hex::encode(&hash[..12]))
     }
 

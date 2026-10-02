@@ -35,7 +35,7 @@ Gotchas:
 
 `.github/workflows/contracts.yml` runs on a plain GitHub runner, with no custom image:
 1. Installs the toolchain from `rust-toolchain.toml`, cargo-near 0.22.0 and cargo-audit.
-2. Runs `make fmt-check`, `make clippy` (trading account only; the factory fails two lints, a redundant `use bs58;` and `as_bytes` after slicing in the naming code), `make test` (unit and sandbox integration tests) and `make audit`.
+2. Runs `make fmt-check`, `make clippy`, `make test` (unit and sandbox integration tests) and `make audit`.
 3. Runs `make release` (reproducible builds in NEAR's image), and checks the trading account wasm is under 4 MiB. For pushes to `main` and manual runs, it uploads both wasms for [releases](releases.md#builds).
 
 - Run any step locally with `make <target>`; `make help` lists them.
