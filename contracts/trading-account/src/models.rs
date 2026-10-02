@@ -40,14 +40,18 @@ pub struct SignRequest {
     pub domain_id: u32,
 }
 
-// port of the private struct from omni-transaction-rs https://github.com/near/omni-transaction-rs/blob/fefa9f2987c7112a546ca7308d7f064e9fed267f/src/near/near_transaction.rs#L54
-#[derive(Serialize, Deserialize, Debug, Clone, BorshSerialize, BorshDeserialize, JsonSchema)]
+// port of the struct from omni-transaction-rs (src/near/near_transaction.rs). Its JSON shape must
+// match omni's, since request_signature serializes omni's NearTransaction and
+// sign_request_callback deserializes it into this type.
+#[derive(Serialize, Deserialize, Debug, Clone, BorshSerialize, BorshDeserialize)]
 #[serde(crate = "near_sdk::serde")]
 pub struct NearTransaction {
     /// An account on which behalf transaction is signed
     pub signer_id: AccountId,
     /// A public key of the access key which was used to sign an account.
     /// Access key holds permissions for calling certain kinds of actions.
+    // omni renames this under its `serde` feature, which Cargo.toml always enables.
+    #[serde(rename = "public_key")]
     pub signer_public_key: PublicKey,
     /// Nonce is used to determine order of transaction in the pool.
     /// It increments for a combination of `signer_id` and `public_key`

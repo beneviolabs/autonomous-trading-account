@@ -38,22 +38,22 @@ Older code and method names say "proxy" for the trading account.
 ## Docs
 
 - [Trading account](docs/trading-account.md): security model, lifecycle with commands, and deleting an account.
-- [Factory](docs/factory.md): account naming, builds, which release to run, and releasing the factory.
-- [Trading account release](docs/trading-account.md#release-new-trading-account-code): shipping new trading account code.
+- [Factory](docs/factory.md): account naming and deploying a new factory.
+- [Builds and releases](docs/releases.md): release builds, what's deployed, and releasing either contract (including DAO proposals).
 - [Contract reference](docs/reference.md): methods, `request_signature` arguments and errors.
 - [Testing](docs/testing.md): local tests and CI.
 
 ## Development
 
 Prerequisites:
-- rustup. `rust-toolchain.toml` pins Rust 1.86, and rustup installs it automatically.
-- cargo-near 0.16.0: `cargo install cargo-near --version 0.16.0 --locked`. The build scripts refuse other versions.
+- rustup. `rust-toolchain.toml` pins Rust 1.97.1, and rustup installs it automatically.
+- cargo-near 0.22.0: `cargo install cargo-near --version 0.22.0 --locked`. The build scripts refuse other versions.
 - [near-cli-rs](https://github.com/near/near-cli-rs), tested with 0.22. Run `near login` for each account you'll sign as.
-- Docker, for `make release` only.
+- Docker, only to reproduce a release build locally. Releases normally use CI's build.
 
 ```bash
 scripts/test.sh   # unit and integration tests
-make release      # reproducible wasm for deployment
+make release      # reproducible release build (CI runs it too)
 make help         # all targets
 ```
 
@@ -63,4 +63,4 @@ The contracts form one Cargo workspace in `contracts/`, with a shared `Cargo.loc
 
 The contracts deployed at `*.peerfolio.near`, including the factory deployed in January 2026, have had independent third-party security reviews. All findings were remediated. Reports: [Peerfolio Security Audits](https://www.notion.so/Security-Audits-3037541592cc80709908c49fc7649260).
 
-Later changes aren't covered unless the reports say so. That includes the factory naming and owner checks from [PR #166](https://github.com/beneviolabs/autonomous-trading-account/pull/166), which came from an internal review.
+Later changes aren't covered unless the reports say so. That includes the factory naming and owner checks from [PR #166](https://github.com/beneviolabs/autonomous-trading-account/pull/166), which came from an internal review, and the near-sdk 5.29 / omni-transaction 0.5 upgrade from [PR #168](https://github.com/beneviolabs/autonomous-trading-account/pull/168), which changes how the trading account builds the transactions it signs.

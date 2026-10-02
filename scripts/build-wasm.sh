@@ -16,13 +16,13 @@
 #   (/Users/<you>/.cargo/registry/...), which would otherwise vary per user.
 set -euo pipefail
 
-CARGO_NEAR_VERSION="0.16.0"
+CARGO_NEAR_VERSION="0.22.0"
 
 crate_dir="$1"
 export CARGO_TARGET_DIR
 CARGO_TARGET_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../contracts" && pwd)/target"
 
-installed="$(cargo near --version | awk '{print $2}')"
+installed="$(cargo near --version 2>/dev/null | awk '{print $2}')" || installed="none"
 if [ "$installed" != "$CARGO_NEAR_VERSION" ]; then
     echo "cargo-near $CARGO_NEAR_VERSION is required, found $installed." >&2
     echo "Run: cargo install cargo-near --version $CARGO_NEAR_VERSION --locked" >&2

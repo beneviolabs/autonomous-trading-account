@@ -2,14 +2,14 @@
 name = "trading-account"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85.0"
+rust-version = "1.93.0"  # near-sdk 5.29's minimum; the toolchain itself is pinned in rust-toolchain.toml
 license = "MIT"
 repository = "https://github.com/beneviolabs/autonomous-trading-account"
 
 [package.metadata.near.reproducible_build]
 # Official NEAR build image, pinned by digest. Keep both crates' values identical.
-image = "sourcescan/cargo-near:0.16.0-rust-1.86.0"
-image_digest = "sha256:3220302ebb7036c1942e772810f21edd9381edf9a339983da43487c77fbad488"
+image = "sourcescan/cargo-near:0.22.0-rust-1.97.1"
+image_digest = "sha256:7467038bdddc86484b73b416eeadce926ff59013e128e53dec5a19e1cb4b2234"
 passed_env = []
 container_build_command = ["cargo", "near", "build", "non-reproducible-wasm", "--locked", "--no-abi"]
 
@@ -23,24 +23,27 @@ integration-tests = []
 
 
 [dependencies]
-near-sdk = {version = "5.17.2", default-features = false, features = ["unit-testing", "unstable", "legacy"] }
-near-contract-standards = "5.17.2"
+near-sdk = {version = "5.29.1", default-features = false, features = ["unit-testing", "unstable", "legacy"] }
+near-contract-standards = "5.29.1"
 near-gas = "0.3.0"
 borsh = "1.5.1"
 borsh-derive = "1.5.1"
 serde = { version = "1.0.214", features = ["derive"] }
-omni-transaction = "0.2.1"
+omni-transaction = { version = "0.5.0", default-features = false, features = ["near", "serde", "serde_json"] }
 sha2 = "0.10.8"
 serde_json = "1.0"
 hex = "0.4.3"
 schemars = "0.8.22"
 bs58 = "0.5.1"
-near-account-id = "^1.1.1"
 once_cell = "1.21.3"
 
 
 [dev-dependencies]
-near-workspaces = "0.21.0"
+near-workspaces = "0.23.0"
 tokio = { version = "1", features = ["full"] }
 serde_json = "1.0"
 anyhow = "1.0"
+# Signs test transactions the way the MPC signer does. Same version near-crypto already uses.
+secp256k1 = { version = "0.27", features = ["recovery"] }
+# Compiles the stub MPC signer in integration_tests.rs.
+wat = "1"
