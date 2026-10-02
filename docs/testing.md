@@ -39,13 +39,8 @@ Gotchas:
 - The integration tests don't run in CI.
 - `cargo audit` ignores are in `contracts/.cargo/audit.toml`, each with a reason. `RUSTSEC-2026-0009` (`time`) needs Rust 1.88 to fix and only reaches test dependencies. The dependency-review step in the workflow mirrors it.
 
-## Manual end-to-end check
+## End-to-end on a live network
 
-To exercise a trading account on a real network, acting as an authorized user, follow the [README walkthrough](../README.md#end-to-end-walkthrough-testnet). Steps 10–12 request a signed transaction with `request_signature` and broadcast it with `near transaction send-signed-transaction`.
+<!-- TODO: document a repeatable testnet end-to-end check (create, authorize, request_signature, broadcast). -->
 
-Common failures:
-- `Unauthorized: only authorized users can request signatures`: the signer isn't in `authorized_users`. The owner counts only after adding itself.
-- `… is not allowed` / `Method … is restricted`: the target isn't on the allowlist.
-- Broadcast rejected for an invalid signature: `mpc_signer_pk` doesn't match `derivation_path`, or the key isn't on the trading account.
-- Broadcast rejected for the nonce: another transaction used it. Request again with a higher nonce.
-- Broadcast fails for balance: the trading account can't pay gas or the attached deposit.
+TODO.
