@@ -70,7 +70,7 @@ These commands use testnet and near-cli-rs (tested with 0.22). Variables:
       ```
    3. Broadcast the base64 value it returns:
       ```bash
-      near transaction send-signed-transaction '<base64>' network-config testnet
+      near transaction send-signed-transaction base64-signed-transaction '<base64>' network-config testnet
       ```
 
    If something fails, see the [common failures](reference.md#request_signature).
