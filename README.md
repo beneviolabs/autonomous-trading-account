@@ -46,14 +46,14 @@ Older code and method names say "proxy" for the trading account.
 ## Development
 
 Prerequisites:
-- rustup. `rust-toolchain.toml` pins Rust 1.86, and rustup installs it automatically.
-- cargo-near 0.16.0: `cargo install cargo-near --version 0.16.0 --locked`. The build scripts refuse other versions.
+- rustup. `rust-toolchain.toml` pins Rust 1.97.1, and rustup installs it automatically.
+- cargo-near 0.22.0: `cargo install cargo-near --version 0.22.0 --locked`. The build scripts refuse other versions.
 - [near-cli-rs](https://github.com/near/near-cli-rs), tested with 0.22. Run `near login` for each account you'll sign as.
-- Docker, for `make release` only.
+- Docker, only to reproduce a release build locally. Releases normally use CI's build.
 
 ```bash
 scripts/test.sh   # unit and integration tests
-make release      # reproducible wasm for deployment
+make release      # reproducible release build (CI runs it too)
 make help         # all targets
 ```
 

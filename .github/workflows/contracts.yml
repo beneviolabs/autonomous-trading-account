@@ -36,7 +36,7 @@ jobs:
 
       - name: Install cargo-near
         # Keep in sync with CARGO_NEAR_VERSION in scripts/build-wasm.sh.
-        run: curl --proto '=https' --tlsv1.2 -LsSf https://github.com/near/cargo-near/releases/download/cargo-near-v0.16.0/cargo-near-installer.sh | sh
+        run: curl --proto '=https' --tlsv1.2 -LsSf https://github.com/near/cargo-near/releases/download/cargo-near-v0.22.0/cargo-near-installer.sh | sh
 
       - name: Install cargo-audit
         uses: taiki-e/install-action@v2
@@ -69,7 +69,10 @@ jobs:
             exit 1
           fi
 
+      # Release builds: pushes to main, plus manual runs (use a manual run on a
+      # branch only for testnet rehearsals). Mainnet releases come from main.
       - name: Upload build artifacts
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: contract-wasm
@@ -80,7 +83,3 @@ jobs:
       - name: Dependency vulnerability scan
         uses: actions/dependency-review-action@v4
         if: github.event_name == 'pull_request'
-        with:
-          # time (RUSTSEC-2026-0009): the fix needs Rust 1.88 and time never reaches the
-          # contract wasm. Mirrors contracts/.cargo/audit.toml.
-          allow-ghsas: GHSA-r6v5-fh4h-64xc

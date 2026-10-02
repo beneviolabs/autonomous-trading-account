@@ -78,7 +78,10 @@ impl TradingAccountFactory {
         Promise::new(full_sub_account.clone())
             .create_account()
             .transfer(env::attached_deposit())
-            .use_global_contract(self.global_proxy_base58_hash.clone())
+            .use_global_contract(
+                <[u8; 32]>::try_from(self.global_proxy_base58_hash.clone())
+                    .expect("global code hash is 32 bytes"),
+            )
             .function_call(
                 "new".to_string(),
                 near_sdk::serde_json::to_vec(&ProxyInitArgs {

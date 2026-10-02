@@ -16,24 +16,26 @@ These rules came from a security review. Named owners used to be mapped by strip
 
 ## Builds
 
-Both contracts are built the same way, from the repo root.
+Both contracts are built the same way.
 
-| | Command | Deploy it? |
+| | How | Deploy it? |
 |---|---|---|
-| Release | `make release` | Yes. Only deploy these. |
+| Release | The `contract-wasm` artifact from CI, or `make release` locally | Yes. Only deploy these. |
 | Dev | `make build`, `contracts/*/build.sh` | No. Tests only. |
 
 Both write to `contracts/target/near/<crate>/<crate>.wasm`:
 - trading account: `contracts/target/near/trading_account/trading_account.wasm`
 - factory: `contracts/target/near/trading_account_factory/trading_account_factory.wasm`
 
-`make release` prints each wasm's SHA-256 in hex and bs58. CI runs the same build on every push and uploads the wasms as artifacts.
-
 - **Release builds are reproducible.** They run `cargo near build reproducible-wasm` in NEAR's build image, pinned by digest under `[package.metadata.near.reproducible_build]` in each crate's `Cargo.toml`. The same commit gives the same hash on any machine. The wasm also records the repository, commit and build image (NEP-330), so explorers can verify it against the source.
-- **Release builds need** Docker running and a clean tree with everything committed, including `Cargo.lock`.
+- **Get release wasm from CI.** The `contracts` workflow runs `make release`, prints each wasm's SHA-256 (hex and bs58) in its log, and uploads both wasms as the `contract-wasm` artifact, kept for 90 days. The commands are in step 1 of each release procedure.
+  - CI uploads the artifact only for pushes to `main` and for manual runs. Pull request and other branch runs build and test but don't upload.
+  - Mainnet releases come from `main`. A manual run on a branch (`gh workflow run contracts.yml --ref <branch>`) is for testnet rehearsals only.
+  - CI only runs on pushes that touch contract files. Otherwise, start a run with `gh workflow run contracts.yml --ref main`.
+- **`make release` locally** needs Docker and a clean tree with everything committed, including `Cargo.lock`. NEAR's build images are x86-only, so on Apple Silicon Docker emulates them and the build is slow. Use it to check a CI hash independently, not as the usual route.
 - **To change the build image**, update `image` and `image_digest` in both crates together. That changes both hashes.
 - **Dev builds aren't reproducible.** They compile natively, and the same commit produces different code on macOS arm64 and on Linux x86_64.
-- **Don't use Rust 1.87 or later.** Its wasm is rejected by near-sandbox (`PrepareError(Deserialization)`). `rust-toolchain.toml` and the release image both use 1.86.
+- **Rust version:** see [below](#rust-version).
 
 What's deployed now (checked 2026-10-01):
 
@@ -42,7 +44,15 @@ What's deployed now (checked 2026-10-01):
 | Trading account global code | `6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f` (hex `59136c3b557222ed2a30f8d02953ab50633566a49c4e107e2314f3a72c19b1f8`) | A native macOS build from before the repo reorg. It can't be reproduced. |
 | Factory code, mainnet and testnet | hex `670ecb8001989c5dd36d8ff96f45bef138f3bac417134c67ac615768c57c4b40` | The old Docker CI build of `a26cd2f` (PR #166) |
 
-The next `make release` will produce new hashes for both, even for unchanged code, because crate names, paths, the lockfile and the build image all changed in the reorg.
+The next release build will produce new hashes for both, even for unchanged code, because crate names, paths, the lockfile and the build image all changed in the reorg.
+
+### Rust version
+
+The toolchain is Rust 1.97.1, in `rust-toolchain.toml` and in the release image (`sourcescan/cargo-near:0.22.0-rust-1.97.1`) in each crate's `Cargo.toml`. Change them together, and pick a Rust version that has a [release image](https://hub.docker.com/r/sourcescan/cargo-near/tags).
+
+- Rust 1.87 and later emit bulk-memory and non-trapping float-to-int wasm instructions. NEAR accepts them from protocol 84 (nearcore 2.12), and mainnet and testnet are past that.
+- cargo-near only allows Rust above 1.86 when near-sdk declares protocol 84 or later as its minimum. near-sdk 5.28+ does, so **don't go back below near-sdk 5.28** without also going back to Rust 1.86.
+- The test sandbox is neard 2.13.4, via `near-workspaces` 0.23.
 
 ## Which release do I need?
 
@@ -62,15 +72,26 @@ Who's involved:
 - **Testnet:** whoever holds the `auth.peerfolio.testnet` key, which is in the keychain.
 - **Mainnet:** the factory owner is the DAO `peerfolio.sputnik-dao.near`, and `auth.peerfolio.near` has no access keys. A council member adds a temporary key through a DAO proposal, deploys with it, and then deletes it. Council members sign with their Ledger, and proposals need 3 of 4 approvals.
 
-### Step 1: Build
+### Step 1: Get the release build
 
-On a clean checkout of the commit you're releasing, with Docker running:
+1. Find the CI run for the commit you're releasing. Mainnet releases use a commit on `main`, from a run whose event is `push` or `workflow_dispatch`; check that it succeeded.
+   ```bash
+   export COMMIT=<release commit>
+   gh run list --workflow contracts.yml --commit $COMMIT --json databaseId,event,conclusion
+   ```
+   If there's none, start one: `gh workflow run contracts.yml --ref main`. For a testnet rehearsal of unmerged code, start one on the branch instead (`--ref <branch>`).
+2. Download the wasms in place of any local builds:
+   ```bash
+   rm -rf contracts/target/near
+   gh run download <run id> -n contract-wasm -D contracts/target/near
+   ```
+3. Check the factory hash matches the one CI printed:
+   ```bash
+   shasum -a 256 contracts/target/near/trading_account_factory/trading_account_factory.wasm
+   gh run view <run id> --log | grep "SHA-256 checksum"
+   ```
 
-```bash
-make release
-```
-
-Record the commit and the factory's hex hash.
+Record the commit and the factory's hex hash. To check it independently, run `make release` on a clean checkout of the commit; it should print the same hash.
 
 ### Step 2: Rehearse on testnet
 
@@ -142,11 +163,12 @@ near account list-keys auth.peerfolio.near network-config mainnet now
 Use this only for a new factory account, for example when the factory's stored state changes. [`contracts/factory/deploy.sh`](../contracts/factory/deploy.sh) does it in one go:
 
 1. It creates `auth.peerfolio.<near|testnet>` from `peerfolio.<near|testnet>` with 4 NEAR.
-2. It deploys the factory wasm from `make release` and calls `new` with the owner, the network and the trading account code hash.
+2. It deploys the release factory wasm from `contracts/target/near` and calls `new` with the owner, the network and the trading account code hash.
 3. It checks the deployed code hash matches the local wasm.
 
+Get the release build first ([Release factory code, step 1](#step-1-get-the-release-build)), then:
+
 ```bash
-make release
 contracts/factory/deploy.sh peerfolio.sputnik-dao.near 6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f mainnet
 ```
 

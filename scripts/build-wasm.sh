@@ -16,7 +16,7 @@
 #   (/Users/<you>/.cargo/registry/...), which would otherwise vary per user.
 set -euo pipefail
 
-CARGO_NEAR_VERSION="0.16.0"
+CARGO_NEAR_VERSION="0.22.0"
 
 crate_dir="$1"
 export CARGO_TARGET_DIR
