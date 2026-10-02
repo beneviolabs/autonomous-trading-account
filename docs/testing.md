@@ -20,13 +20,10 @@ cargo test -p trading-account --features integration-tests --lib integration_tes
 Test one package per command (`make test-unit` does). The contracts enable different near-sdk features, and `--workspace` would unify them.
 
 Gotchas:
-- **The first build can hang.** The `near-workspaces` build script downloads a `near-sandbox` binary at compile time and can stall for a long time. Point it at an existing binary to skip the download:
-  ```bash
-  export NEAR_SANDBOX_BIN_PATH=/path/to/near-sandbox
-  ```
-  Earlier builds leave a copy under `target/*/build/near-sandbox-utils-*/out/.near/near-sandbox-*/near-sandbox`.
+- **The first integration test run downloads the sandbox.** `near-workspaces` fetches neard 2.10.4 the first time the tests start a sandbox, and caches it. To run offline, or with a binary you already have, set `NEAR_SANDBOX_BIN_PATH=/path/to/near-sandbox`.
 - **Debug assertions are off in the test profile.** `[profile.test] debug-assertions = false` is in the workspace `contracts/Cargo.toml` because near-sdk's mocked blockchain trips Rust's debug-only pointer precondition check (`unsafe precondition(s) violated: ptr::replace …`) and aborts the test binary. Don't remove it.
-- **The integration tests need wasm built with Rust ≤ 1.86.** Otherwise they fail with `CompilationError(PrepareError(Deserialization))`. `build.sh` uses the version in `rust-toolchain.toml`.
+- **The integration tests need wasm built with Rust ≤ 1.86.** The sandbox (neard 2.10.4) rejects newer wasm with `CompilationError(PrepareError(Deserialization))`. `build.sh` uses the version in `rust-toolchain.toml`. Moving past 1.86 is a [TODO](factory.md#rust-version).
+- **Rebuild the wasm before rerunning integration tests.** They embed the wasm at compile time, so after changing the contract, run `contracts/trading-account/build.sh` first, or use `scripts/test.sh`, which does.
 
 ## CI
 

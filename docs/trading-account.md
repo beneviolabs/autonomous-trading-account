@@ -102,19 +102,30 @@ Who's involved:
   - testnet: `peerfolio.peerfolio.testnet`, directly
   - mainnet: the DAO `peerfolio.sputnik-dao.near`, through a proposal that needs 3 of 4 council approvals, signed with Ledgers
 
-### Step 1: Build
+### Step 1: Get the release build
 
-On a clean checkout of the commit you're releasing, with Docker running:
+1. Find the CI run for the commit you're releasing. Use a run whose event is `push` or `workflow_dispatch`, and check that it succeeded.
+   ```bash
+   export COMMIT=<release commit>
+   gh run list --workflow contracts.yml --commit $COMMIT --json databaseId,event,conclusion
+   ```
+   If there's none, start one on a branch whose head is that commit: `gh workflow run contracts.yml --ref <branch>`.
+2. Download the wasms in place of any local builds:
+   ```bash
+   rm -rf contracts/target/near
+   gh run download <run id> -n contract-wasm -D contracts/target/near
+   ```
+3. Check the trading account hash matches the one CI printed:
+   ```bash
+   shasum -a 256 contracts/target/near/trading_account/trading_account.wasm
+   gh run view <run id> --log | grep "SHA-256 checksum"
+   ```
 
-```bash
-make release
-```
-
-Record the commit and the trading account hashes. See [factory.md](factory.md#builds) for how builds work.
+Record the commit and the bs58 hash. To check it independently, run `make release` on a clean checkout of the commit; it should print the same hash. See [factory.md](factory.md#builds) for how builds work.
 
 ### Step 2: Rehearse on testnet
 
-1. Deploy the global contract. Record the bs58 hash it prints. It should match `make release`.
+1. Deploy the global contract. The bs58 hash it prints should match step 1.
    ```bash
    near contract deploy-as-global use-file contracts/target/near/trading_account/trading_account.wasm as-global-hash peerfolio.testnet network-config testnet sign-with-keychain send
    ```

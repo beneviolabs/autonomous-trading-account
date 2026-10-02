@@ -1,5 +1,5 @@
 # Matches the Rust in the release image (sourcescan/cargo-near:*-rust-1.86.0 in each Cargo.toml).
-# near-sandbox rejects wasm from Rust >= 1.87.
+# Rust >= 1.87 is blocked by near-sdk 5.17 / cargo-near and the test sandbox; see the TODO in docs/factory.md#rust-version.
 [toolchain]
 channel = "1.86.0"
 targets = ["wasm32-unknown-unknown"]
