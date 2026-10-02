@@ -19,20 +19,24 @@ cargo test -p trading-account --features integration-tests --lib integration_tes
 
 Test one package per command (`make test-unit` does). The contracts enable different near-sdk features, and `--workspace` would unify them.
 
+What covers `request_signature`, the path that builds and signs transactions:
+- **`test_transaction_bytes_unchanged`** pins the bytes the MPC signs and the final signed transaction to what the audited version produced. If it fails after a dependency bump, the encoding or the JSON hand-off between `request_signature` and `sign_request_callback` changed. Don't update the expected values without finding out why.
+- **`sign_request_callback` unit tests** feed it a response in the real signer's format, signed with a fixed secp256k1 key by `test_support.rs` (success and signer failure).
+- **`test_request_signature_with_stub_signer`** runs the whole call in the sandbox with the documented minimum of 100 Tgas, using a tiny WAT contract in place of `v1.signer`.
+- Only a testnet run checks the real signer.
+
 Gotchas:
 - **The first integration test run downloads the sandbox.** `near-workspaces` fetches neard 2.13.4 (the version mainnet runs) the first time the tests start a sandbox, and caches it. To run offline, or with a binary you already have, set `NEAR_SANDBOX_BIN_PATH=/path/to/near-sandbox`.
 - **Debug assertions are off in the test profile.** `[profile.test] debug-assertions = false` is in the workspace `contracts/Cargo.toml` because near-sdk's mocked blockchain trips Rust's debug-only pointer precondition check (`unsafe precondition(s) violated: ptr::replace …`) and aborts the test binary. Don't remove it.
 - **Old sandboxes reject current wasm.** Wasm from Rust 1.87+ uses instructions that neard before 2.12 rejects with `CompilationError(PrepareError(Deserialization))`. If you see that error, check that `NEAR_SANDBOX_BIN_PATH` doesn't point at an older binary.
-- **`test_transaction_bytes_unchanged` pins the signed transaction bytes.** If it fails after a dependency bump, the bytes the MPC signs, or the JSON hand-off between `request_signature` and `sign_request_callback`, have changed. Don't update the expected values without finding out why.
-- **`request_signature` is tested against a stub signer.** `test_support.rs` signs the transaction with a fixed secp256k1 key the way the MPC signer would. Unit tests call `sign_request_callback` directly (success and signer failure). `test_request_signature_with_stub_signer` runs the whole call in the sandbox with 100 Tgas, using a tiny WAT contract in place of `v1.signer`. Only a testnet run checks the real signer.
 - **Rebuild the wasm before rerunning integration tests.** They embed the wasm at compile time, so after changing the contract, run `contracts/trading-account/build.sh` first, or use `scripts/test.sh`, which does.
 
 ## CI
 
 `.github/workflows/contracts.yml` runs on a plain GitHub runner, with no custom image:
 1. Installs the toolchain from `rust-toolchain.toml`, cargo-near 0.22.0 and cargo-audit.
-2. Runs `make fmt-check`, `make clippy` (trading account only, since the factory currently fails clippy on a redundant `use bs58;`), `make test` (unit and sandbox integration tests) and `make audit`.
-3. Runs `make release` (reproducible builds in NEAR's image), checks the trading account wasm is under 4 MiB, and uploads both wasms.
+2. Runs `make fmt-check`, `make clippy` (trading account only; the factory fails two lints, a redundant `use bs58;` and `as_bytes` after slicing in the naming code), `make test` (unit and sandbox integration tests) and `make audit`.
+3. Runs `make release` (reproducible builds in NEAR's image), and checks the trading account wasm is under 4 MiB. For pushes to `main` and manual runs, it uploads both wasms for [releases](releases.md#builds).
 
 - Run any step locally with `make <target>`; `make help` lists them.
 - `cargo audit` ignores are in `contracts/.cargo/audit.toml`, each with a reason. `RUSTSEC-2026-0285` (`rustls`) only reaches test dependencies and can't be fixed until near-sdk moves to near-crypto 0.38. The dependency-review step in the workflow mirrors it.

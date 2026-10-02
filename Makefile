@@ -19,7 +19,7 @@ build:
 fmt-check:
 	cd contracts && cargo fmt --all -- --check
 
-# The factory is excluded until its redundant `use bs58;` is removed.
+# The factory is excluded until its two lints are fixed (see docs/testing.md#ci).
 clippy:
 	cd contracts && cargo clippy -p trading-account -- -D warnings
 

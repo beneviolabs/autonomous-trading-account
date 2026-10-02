@@ -38,8 +38,8 @@ Older code and method names say "proxy" for the trading account.
 ## Docs
 
 - [Trading account](docs/trading-account.md): security model, lifecycle with commands, and deleting an account.
-- [Factory](docs/factory.md): account naming, builds, which release to run, and releasing the factory.
-- [Trading account release](docs/trading-account.md#release-new-trading-account-code): shipping new trading account code.
+- [Factory](docs/factory.md): account naming and deploying a new factory.
+- [Builds and releases](docs/releases.md): release builds, what's deployed, and releasing either contract (including DAO proposals).
 - [Contract reference](docs/reference.md): methods, `request_signature` arguments and errors.
 - [Testing](docs/testing.md): local tests and CI.
 
