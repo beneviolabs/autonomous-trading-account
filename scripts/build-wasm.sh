@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Fast, native DEV build of one contract crate's wasm (used by build.sh, tests and CI checks).
+# Fast, native DEV build of one contract crate's wasm (used by `make build`, each crate's
+# build.sh and scripts/test.sh).
 #
 # Usage: scripts/build-wasm.sh <crate dir>
-# Output: contracts/target/near/<lib name>/<lib name>.wasm
+# Output: contracts/target/near/<lib name>/<lib name>.wasm, even if CARGO_TARGET_DIR is set,
+# because the integration tests (include_bytes!), deploy.sh and the docs all read it from there.
 #
 # Do NOT deploy what this produces. Its hash depends on the host (OS/CPU/toolchain), so it
 # can't be verified by anyone else. Release builds are reproducible and run in NEAR's pinned
@@ -17,6 +19,8 @@ set -euo pipefail
 CARGO_NEAR_VERSION="0.16.0"
 
 crate_dir="$1"
+export CARGO_TARGET_DIR
+CARGO_TARGET_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../contracts" && pwd)/target"
 
 installed="$(cargo near --version | awk '{print $2}')"
 if [ "$installed" != "$CARGO_NEAR_VERSION" ]; then
@@ -28,8 +32,7 @@ fi
 cd "$crate_dir"
 lib_name="$(cargo metadata --no-deps --format-version 1 \
     | python3 -c 'import json,sys,os; m=json.load(sys.stdin); d=os.getcwd(); print(next(t["name"] for p in m["packages"] if os.path.dirname(p["manifest_path"])==d for t in p["targets"] if "cdylib" in t["kind"]))')"
-target_dir="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
-wasm="$target_dir/near/$lib_name/$lib_name.wasm"
+wasm="$CARGO_TARGET_DIR/near/$lib_name/$lib_name.wasm"
 
 # Do not let cargo-near reuse an artifact produced by a different build mode.
 rm -f "$wasm"

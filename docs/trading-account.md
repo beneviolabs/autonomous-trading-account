@@ -17,7 +17,8 @@ The per-user contract, created by the [factory](factory.md) at `implicit_<24hex>
 ## Lifecycle
 
 These commands use testnet and near-cli-rs (tested with 0.22). Variables:
-- `$OWNER`: a funded NEAR implicit account. To make one, run `near account create-account fund-later use-auto-generation save-to-folder <dir>` and send NEAR to the 64-hex ID it prints ([faucet](https://near-faucet.io/)). Then sign as it with `sign-with-access-key-file <dir>/<id>.json` instead of `sign-with-keychain`.
+- `$OWNER`: a funded NEAR implicit account. To make one, run `near account create-account fund-later use-auto-generation save-to-folder <dir>` and send NEAR to the 64-hex ID it prints ([faucet](https://near-faucet.io/)).
+- `$OWNER_KEY`: the owner's key file, `<dir>/<id>.json`. Commands signed by the owner use `sign-with-access-key-file $OWNER_KEY`.
 - `$AGENT`: the authorized user. Peerfolio's mainnet agent is `bot.peerfolio.near`. There's no live testnet agent, so use any testnet account you control.
 - `$TA`: the trading account ID.
 
@@ -26,7 +27,7 @@ These commands use testnet and near-cli-rs (tested with 0.22). Variables:
    near contract call-function as-read-only auth.peerfolio.testnet get_base_account_name json-args "{\"owner_id\":\"$OWNER\"}" network-config testnet now
    ```
    ```bash
-   near contract call-function as-transaction auth.peerfolio.testnet deposit_and_create_proxy_global json-args "{\"owner_id\":\"$OWNER\"}" prepaid-gas '300.0 Tgas' attached-deposit '0.12 NEAR' sign-as $OWNER network-config testnet sign-with-keychain send
+   near contract call-function as-transaction auth.peerfolio.testnet deposit_and_create_proxy_global json-args "{\"owner_id\":\"$OWNER\"}" prepaid-gas '300.0 Tgas' attached-deposit '0.12 NEAR' sign-as $OWNER network-config testnet sign-with-access-key-file $OWNER_KEY send
    ```
    `$TA` is `<name>.auth.peerfolio.testnet`. Store it; don't re-derive it later.
 2. **Derive the MPC key.** By convention, the derivation path is the trading account ID.
@@ -35,14 +36,14 @@ These commands use testnet and near-cli-rs (tested with 0.22). Variables:
    ```
 3. **Register the key and authorize the agent**, as the owner:
    ```bash
-   near contract call-function as-transaction $TA add_full_access_key json-args '{"public_key":"secp256k1:<MPC key>"}' prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' sign-as $OWNER network-config testnet sign-with-keychain send
+   near contract call-function as-transaction $TA add_full_access_key json-args '{"public_key":"secp256k1:<MPC key>"}' prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' sign-as $OWNER network-config testnet sign-with-access-key-file $OWNER_KEY send
    ```
    ```bash
-   near contract call-function as-transaction $TA add_authorized_user json-args "{\"account_id\":\"$AGENT\"}" prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' sign-as $OWNER network-config testnet sign-with-keychain send
+   near contract call-function as-transaction $TA add_authorized_user json-args "{\"account_id\":\"$AGENT\"}" prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' sign-as $OWNER network-config testnet sign-with-access-key-file $OWNER_KEY send
    ```
 4. **Fund it** with what the agent may trade. Keep some NEAR there at all times, because it pays gas for every signed transaction.
    ```bash
-   near tokens $OWNER send-near $TA '0.2 NEAR' network-config testnet sign-with-keychain send
+   near tokens $OWNER send-near $TA '0.2 NEAR' network-config testnet sign-with-access-key-file $OWNER_KEY send
    ```
 5. **Trade.** The agent requests a signed transaction and broadcasts it:
 
@@ -85,7 +86,7 @@ Deleting the account returns only its native NEAR. First withdraw wNEAR, intents
 
 1. As the owner, add your own public key to the trading account:
    ```bash
-   near contract call-function as-transaction $TA add_full_access_key json-args '{"public_key":"<your public key>"}' prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' sign-as $OWNER network-config testnet sign-with-keychain send
+   near contract call-function as-transaction $TA add_full_access_key json-args '{"public_key":"<your public key>"}' prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' sign-as $OWNER network-config testnet sign-with-access-key-file $OWNER_KEY send
    ```
 2. Delete the trading account with that key, sending the remaining NEAR to the owner:
    ```bash
