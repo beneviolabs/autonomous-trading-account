@@ -30,13 +30,13 @@ These commands use testnet and near-cli-rs (tested with 0.22). Variables:
    near contract call-function as-transaction auth.peerfolio.testnet deposit_and_create_proxy_global json-args "{\"owner_id\":\"$OWNER\"}" prepaid-gas '300.0 Tgas' attached-deposit '0.12 NEAR' sign-as $OWNER network-config testnet sign-with-access-key-file $OWNER_KEY send
    ```
    `$TA` is `<name>.auth.peerfolio.testnet`. Store it; don't re-derive it later.
-2. **Derive the MPC key.** By convention, the derivation path is the trading account ID.
+2. **Derive the MPC key.** By convention, the derivation path is the trading account ID. It returns the key with its `secp256k1:` prefix; use that whole value wherever the commands below say `<MPC key>`.
    ```bash
    near contract call-function as-read-only v1.signer-prod.testnet derived_public_key json-args "{\"path\":\"$TA\",\"predecessor\":\"$TA\",\"domain_id\":0}" network-config testnet now
    ```
 3. **Register the key and authorize the agent**, as the owner:
    ```bash
-   near contract call-function as-transaction $TA add_full_access_key json-args '{"public_key":"secp256k1:<MPC key>"}' prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' sign-as $OWNER network-config testnet sign-with-access-key-file $OWNER_KEY send
+   near contract call-function as-transaction $TA add_full_access_key json-args '{"public_key":"<MPC key>"}' prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' sign-as $OWNER network-config testnet sign-with-access-key-file $OWNER_KEY send
    ```
    ```bash
    near contract call-function as-transaction $TA add_authorized_user json-args "{\"account_id\":\"$AGENT\"}" prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' sign-as $OWNER network-config testnet sign-with-access-key-file $OWNER_KEY send
@@ -63,14 +63,21 @@ These commands use testnet and near-cli-rs (tested with 0.22). Variables:
        Agent->>NEAR: broadcast (runs from the trading account)
    ```
 
-   1. Get the MPC key's current nonce from `near account list-keys $TA network-config testnet now`, and a recent block hash, for example from [testnet.nearblocks.io](https://testnet.nearblocks.io).
-   2. Request the signature. This one wraps 0.05 NEAR. `actions_json` is a JSON *string*, and `nonce` is the current nonce + 1.
+   1. Get the MPC key's current nonce from `near account list-keys $TA network-config testnet now`, and a recent block hash:
       ```bash
-      near contract call-function as-transaction $TA request_signature json-args "{\"contract_id\":\"wrap.testnet\",\"actions_json\":\"[{\\\"type\\\":\\\"FunctionCall\\\",\\\"method_name\\\":\\\"near_deposit\\\",\\\"args\\\":{},\\\"gas\\\":\\\"30000000000000\\\",\\\"deposit\\\":\\\"50000000000000000000000\\\"}]\",\"nonce\":\"<nonce + 1>\",\"block_hash\":\"<block hash>\",\"mpc_signer_pk\":\"secp256k1:<MPC key>\",\"derivation_path\":\"$TA\"}" prepaid-gas '300.0 Tgas' attached-deposit '1 yoctoNEAR' sign-as $AGENT network-config testnet sign-with-keychain send
+      curl -s https://rpc.testnet.near.org -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"block","params":{"finality":"final"}}' | jq -r .result.header.hash
+      ```
+   2. Request the signature. This one wraps 0.05 NEAR; the first wrap keeps 0.00125 of it for `wrap.testnet` storage, so 0.04875 wNEAR arrives. `actions_json` is a JSON *string*, and `nonce` is the current nonce + 1.
+      ```bash
+      near contract call-function as-transaction $TA request_signature json-args "{\"contract_id\":\"wrap.testnet\",\"actions_json\":\"[{\\\"type\\\":\\\"FunctionCall\\\",\\\"method_name\\\":\\\"near_deposit\\\",\\\"args\\\":{},\\\"gas\\\":\\\"30000000000000\\\",\\\"deposit\\\":\\\"50000000000000000000000\\\"}]\",\"nonce\":\"<nonce + 1>\",\"block_hash\":\"<block hash>\",\"mpc_signer_pk\":\"<MPC key>\",\"derivation_path\":\"$TA\"}" prepaid-gas '300.0 Tgas' attached-deposit '1 yoctoNEAR' sign-as $AGENT network-config testnet sign-with-keychain send
       ```
    3. Broadcast the base64 value it returns:
       ```bash
       near transaction send-signed-transaction base64-signed-transaction '<base64>' network-config testnet
+      ```
+      Or send it to the RPC directly:
+      ```bash
+      curl -s https://rpc.testnet.near.org -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"send_tx","params":{"signed_tx_base64":"<base64>","wait_until":"FINAL"}}'
       ```
 
    If something fails, see the [common failures](reference.md#request_signature).

@@ -43,6 +43,18 @@ Gotchas:
 
 ## End-to-end on a live network
 
-<!-- TODO: document a repeatable testnet end-to-end check (create, authorize, request_signature, broadcast). -->
+The sandbox tests use a stub signer, so only a testnet run checks the real MPC signer's response. Do this for any change to how `request_signature` builds, signs or returns transactions, before release.
 
-TODO.
+It runs unreleased trading account code on `auth-v2.peerfolio.testnet`, a retired testnet factory kept for this. Its key is in the keychain, and the account is its own owner and authorized user. It needs about 3.2 NEAR locked for the contract's storage; keep at least 4 NEAR on it.
+
+1. Build the code under test: `contracts/trading-account/build.sh`.
+2. Deploy it. Redeploying over the trading account keeps its state, so skip `new` if it's already initialized:
+   ```bash
+   near contract deploy auth-v2.peerfolio.testnet use-file contracts/target/near/trading_account/trading_account.wasm without-init-call network-config testnet sign-with-keychain send
+   ```
+   If the code under test changes the stored state, or the account holds another contract's state, clear it first: deploy `state_cleanup.wasm` from [near-clear-state](https://github.com/doriancrutcher/near-clear-state), call `clean` with `{"keys":["U1RBVEU="]}` (base64 for `STATE`), then deploy with `with-init-call new json-args '{"owner_id":"auth-v2.peerfolio.testnet","signer_id":"v1.signer-prod.testnet"}' prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR'`.
+3. Run [lifecycle](trading-account.md#lifecycle) steps 2, 3 and 5 with `$TA`, `$OWNER` and `$AGENT` all set to `auth-v2.peerfolio.testnet`, signing every command with `sign-with-keychain`. Step 4 isn't needed; the account's own balance pays.
+4. It passes if `request_signature` returns a signed transaction, the broadcast succeeds, and `ft_balance_of` on `wrap.testnet` shows the wNEAR.
+5. Clean up, so the next run starts the same way: unwrap with `near_withdraw` (`{"amount":"<wNEAR balance>"}`, 1 yoctoNEAR) and call `storage_unregister` (1 yoctoNEAR) on `wrap.testnet`; `remove_authorized_user` for `auth-v2.peerfolio.testnet`; and delete the MPC key with `near account delete-keys auth-v2.peerfolio.testnet public-keys <MPC key> network-config testnet sign-with-keychain send`.
+
+Last run: 2026-10-02, for #168 ([request_signature](https://testnet.nearblocks.io/txns/BHvjRyc8YG3NJHi8fsPCk44zvMxtoxvtAA6JdzkU2576), [broadcast](https://testnet.nearblocks.io/txns/8EJxJ2B3XajLmUhyLttihAUKCxkwFNwpLxm9H1T1Cs97)).

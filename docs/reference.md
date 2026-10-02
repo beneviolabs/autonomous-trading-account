@@ -49,6 +49,7 @@ Common failures:
 
 | Symptom | Cause |
 |---|---|
+| `Failed to deserialize input from JSON … invalid character '<'` | A `<placeholder>` from the docs was left in the arguments. |
 | `Unauthorized: only authorized users can request signatures` | The caller isn't an authorized user. |
 | `… is not allowed` / `Method … is restricted` | The receiver or method isn't allowlisted. |
 | Broadcast rejected: invalid signature | `mpc_signer_pk` doesn't match `derivation_path`, or the key isn't on the trading account. |
