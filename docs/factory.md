@@ -34,7 +34,7 @@ Both write to `contracts/target/near/<crate>/<crate>.wasm`:
 - **`make release` locally** needs Docker and a clean tree with everything committed, including `Cargo.lock`. NEAR's build images are x86-only, so on Apple Silicon Docker emulates them and the build is slow. Use it to check a CI hash independently, not as the usual route.
 - **To change the build image**, update `image` and `image_digest` in both crates together. That changes both hashes.
 - **Dev builds aren't reproducible.** They compile natively, and the same commit produces different code on macOS arm64 and on Linux x86_64.
-- **Don't use Rust 1.87 or later yet.** See [Rust version](#rust-version) below.
+- **Rust version:** see [below](#rust-version).
 
 What's deployed now (checked 2026-10-01):
 
@@ -47,20 +47,11 @@ The next release build will produce new hashes for both, even for unchanged code
 
 ### Rust version
 
-The toolchain is pinned to Rust 1.86 (`rust-toolchain.toml`, and the release image in each crate's `Cargo.toml`). Rust 1.87 and later emit bulk-memory and non-trapping float-to-int wasm instructions.
+The toolchain is Rust 1.97.1, in `rust-toolchain.toml` and in the release image (`sourcescan/cargo-near:0.22.0-rust-1.97.1`) in each crate's `Cargo.toml`. Change them together, and pick a Rust version that has a [release image](https://hub.docker.com/r/sourcescan/cargo-near/tags).
 
-- NEAR only accepts those from protocol 84 (nearcore 2.12). Mainnet and testnet are past that, so deploying such wasm works now.
-- Our tooling still rejects it. With near-sdk 5.17.2, cargo-near refuses Rust above 1.86. The test sandbox, neard 2.10.4 via `near-workspaces` 0.22.1, fails such wasm with `CompilationError(PrepareError(Deserialization))`.
-- `near-workspaces` is pinned to `=0.22.1` because 0.22.2 and later need Rust 1.93 to compile the tests.
-
-> **TODO: upgrade to near-sdk 5.28+ and a current Rust.** near-sdk 5.28+ declares protocol 84 as its minimum, and cargo-near 0.21+ then lifts the 1.86 cap without flags. The work:
-> 1. Bump `near-sdk` and `near-contract-standards` to 5.29.x.
-> 2. Fix the factory: `use_global_contract` now takes a `[u8; 32]`, so convert `global_proxy_base58_hash` with `<[u8; 32]>::try_from(...)`. `decode_code_hash` already guarantees 32 bytes, and the stored state is unchanged.
-> 3. Bump `omni-transaction` from 0.2 to 0.5 (0.2 only works with near-sdk's old `near-account-id` 1.x). With `default-features = false, features = ["near", "serde", "serde_json"]`, the trading account had 10 compile errors in a trial run: `JsonSchema` derives in `models.rs` over omni types (0.5 uses schemars 1, near-sdk uses 0.8), and `NearToken` vs `u128` amounts in `lib.rs`.
-> 4. Bump `near-workspaces` to 0.23 (sandbox 2.13.4, matching mainnet), Rust to a version that has a release image (e.g. 1.97.1 with `sourcescan/cargo-near:0.22.0-rust-1.97.1`), and cargo-near to 0.22 in `scripts/build-wasm.sh`, the workflow and both crates' `reproducible_build` sections.
-> 5. Run all tests, compare signed transaction bytes against the current build, and get the change reviewed. It changes the code that builds and signs transactions, so it falls outside the audited version.
->
-> A tooling-only shortcut works too, without contract changes, but relies on two escape hatches: `--skip-rust-version-check` and `-Clink-arg=--allow-undefined`. near-sdk 5.17's host imports don't link under newer rust-lld without the second. We don't recommend it.
+- Rust 1.87 and later emit bulk-memory and non-trapping float-to-int wasm instructions. NEAR accepts them from protocol 84 (nearcore 2.12), and mainnet and testnet are past that.
+- cargo-near only allows Rust above 1.86 when near-sdk declares protocol 84 or later as its minimum. near-sdk 5.28+ does, so **don't go back below near-sdk 5.28** without also going back to Rust 1.86.
+- The test sandbox is neard 2.13.4, via `near-workspaces` 0.23.
 
 ## Which release do I need?
 
