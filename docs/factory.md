@@ -4,134 +4,158 @@ The factory creates trading accounts as sub-accounts of itself. Each one runs th
 
 ## Trading account naming
 
-A trading account is named `implicit_<24hex>.<factory>`. `<24hex>` is the first 24 hex characters of `sha256(first 32 characters of owner_id)`. Get it from `get_base_account_name`.
+A trading account is named `implicit_<24hex>.<factory>`, for example `implicit_07454f3217b9229ead97798c.auth.peerfolio.near`. `<24hex>` is the first 24 hex characters of `sha256(first 32 characters of owner_id)`. This is the original derivation, kept so existing users keep their names. Get it from `get_base_account_name` rather than computing it yourself. Once the account exists, store its ID instead of re-deriving it.
 
-- **Owners must be NEAR implicit accounts** (64 lowercase hex characters). Named accounts and `0x…` accounts are rejected.
+- **Owners must be NEAR implicit accounts** (64 lowercase hex characters). Named accounts (`alice.near`), `0x…` accounts and uppercase hex are rejected.
 - **Only the owner can create its own trading account.** The caller must be `owner_id`.
-- **The factory account ID can be at most 30 characters**, so trading account IDs fit NEAR's 64-character limit.
-- **Attach about 0.12 NEAR** when creating one. The contract minimum is far lower, but the deposit becomes the trading account's balance, and that balance pays for gas.
+- **The factory account ID can be at most 30 characters**, so `implicit_` + 24 hex + `.` + the factory ID fits NEAR's 64-character limit.
+- **Attach about 0.12 NEAR** when creating one. The contract minimum (1,000,000 yoctoNEAR) is a placeholder. The deposit becomes the trading account's balance, and that balance pays gas for every signed transaction. Mainnet onboarding attaches 0.04 to 0.12 NEAR.
+- If creation fails (for example, the account already exists), nothing is created and the deposit is refunded.
+
+These rules came from a security review. Named owners used to be mapped by stripping `.near`/`.testnet` and replacing dots with hyphens. That let distinct owners collide (`alice.near` and `alice.testnet`), and let anyone create an account on someone else's behalf. The collision analysis is in the doc comment on `get_base_account_name`.
 
 ## Builds
+
+Both contracts are built the same way, from the repo root.
 
 | | Command | Deploy it? |
 |---|---|---|
 | Release | `make release` | Yes. Only deploy these. |
-| Dev | `make build`, `contracts/*/build.sh` | No |
+| Dev | `make build`, `contracts/*/build.sh` | No. Tests only. |
 
-Both write `contracts/target/near/<crate>/<crate>.wasm`, for example `trading_account/trading_account.wasm`.
+Both write to `contracts/target/near/<crate>/<crate>.wasm`:
+- trading account: `contracts/target/near/trading_account/trading_account.wasm`
+- factory: `contracts/target/near/trading_account_factory/trading_account_factory.wasm`
 
-- **Release builds are reproducible.** They run `cargo near build reproducible-wasm` in NEAR's build image, pinned by digest in each crate's `Cargo.toml`. The same commit gives the same hash on any machine, and the wasm records its source commit so explorers can verify it. They need Docker and a clean, committed tree. To change the image, update both crates together.
-- **Dev builds aren't.** They compile natively, so the same commit produces different code on macOS and on Linux.
-- **The live global hash `6ziTqYXT…` can't be reproduced.** It came from a native build before this repo's layout changed. The next release will have new hashes for both contracts even if the code is unchanged.
-- Rust 1.87 and later produce wasm that near-sandbox rejects. The toolchain and the release image both use 1.86.
+`make release` prints each wasm's SHA-256 in hex and bs58. CI runs the same build on every push and uploads the wasms as artifacts.
 
-## Releases
+- **Release builds are reproducible.** They run `cargo near build reproducible-wasm` in NEAR's build image, pinned by digest under `[package.metadata.near.reproducible_build]` in each crate's `Cargo.toml`. The same commit gives the same hash on any machine. The wasm also records the repository, commit and build image (NEP-330), so explorers can verify it against the source.
+- **Release builds need** Docker running and a clean tree with everything committed, including `Cargo.lock`.
+- **To change the build image**, update `image` and `image_digest` in both crates together. That changes both hashes.
+- **Dev builds aren't reproducible.** They compile natively, and the same commit produces different code on macOS arm64 and on Linux x86_64.
+- **Don't use Rust 1.87 or later.** Its wasm is rejected by near-sandbox (`PrepareError(Deserialization)`). `rust-toolchain.toml` and the release image both use 1.86.
 
-The two contracts are released independently:
+What's deployed now (checked 2026-10-01):
 
-- **New trading account code** needs a global deploy and a factory call. The factory code stays as it is.
-- **New factory code** is a redeploy of the factory account. The factory's stored owner, MPC signer and global hash are kept, so new trading accounts still get the same code.
+| | Hash | Built from |
+|---|---|---|
+| Trading account global code | `6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f` (hex `59136c3b557222ed2a30f8d02953ab50633566a49c4e107e2314f3a72c19b1f8`) | A native macOS build from before the repo reorg. It can't be reproduced. |
+| Factory code, mainnet and testnet | hex `670ecb8001989c5dd36d8ff96f45bef138f3bac417134c67ac615768c57c4b40` | The old Docker CI build of `a26cd2f` (PR #166) |
 
-Neither changes existing trading accounts. They keep the code they were created with.
+The next `make release` will produce new hashes for both, even for unchanged code, because crate names, paths, the lockfile and the build image all changed in the reorg.
 
-Every release starts with `make release` on a clean checkout of the release commit. Record the commit and the hashes it prints. Rehearse on testnet before mainnet.
+## Which release do I need?
 
-On mainnet the factory owner is the DAO `peerfolio.sputnik-dao.near`, and `auth.peerfolio.near` has no access keys. Any change goes through a DAO proposal (below). On testnet the owner `peerfolio.peerfolio.testnet` calls the factory directly, and the factory account has its own key.
+| What changed | Procedure | Affects |
+|---|---|---|
+| Trading account code (`contracts/trading-account`) | [Release trading account code](trading-account.md#release-new-trading-account-code) | Trading accounts created afterwards. The factory code isn't touched. |
+| Factory code (`contracts/factory`) | [Release factory code](#release-factory-code) below | The factory only. It keeps its owner, MPC signer and trading account code hash. |
+| A new factory account is needed | [Deploy a new factory](#deploy-a-new-factory) below | A new factory. Accounts created by the old one stay where they are. |
 
-### DAO proposals
+Existing trading accounts are never changed by a release. They keep the code they were created with.
 
-Each mainnet change is a Function Call proposal to `auth.peerfolio.near`. Council members sign with their Ledger. Set `METHOD` and `ARGS` as given in each release step, then:
+## Release factory code
+
+Use this for changes like bug fixes, gas tweaks and new view methods. A code-only redeploy keeps the factory's stored state. It only works if the new code reads the same stored fields, so if the `TradingAccountFactory` struct changed, deploy a new factory instead.
+
+Who's involved:
+- **Testnet:** whoever holds the `auth.peerfolio.testnet` key, which is in the keychain.
+- **Mainnet:** the factory owner is the DAO `peerfolio.sputnik-dao.near`, and `auth.peerfolio.near` has no access keys. A council member adds a temporary key through a DAO proposal, deploys with it, and then deletes it. Council members sign with their Ledger, and proposals need 3 of 4 approvals.
+
+### Step 1: Build
+
+On a clean checkout of the commit you're releasing, with Docker running:
 
 ```bash
-export COUNCIL=<your council account>
-export HD_PATH="m/44'/397'/0'/0'/1'"   # your Ledger path
-export KIND='{"FunctionCall":{"receiver_id":"auth.peerfolio.near","actions":[{"method_name":"'$METHOD'","args":"'$ARGS'","deposit":"0","gas":"15000000000000"}]}}'
+make release
 ```
 
-1. Submit the proposal. The 0.1 NEAR is the proposal bond. The call returns the proposal ID.
-   ```bash
-   near contract call-function as-transaction peerfolio.sputnik-dao.near add_proposal json-args "{\"proposal\":{\"description\":\"<what and why, commit, hash>\",\"kind\":$KIND}}" prepaid-gas '30.0 Tgas' attached-deposit '0.1 NEAR' sign-as $COUNCIL network-config mainnet sign-with-ledger --seed-phrase-hd-path "$HD_PATH" send
-   ```
-2. Check it:
-   ```bash
-   near contract call-function as-read-only peerfolio.sputnik-dao.near get_proposal json-args '{"id":<ID>}' network-config mainnet now
-   ```
-3. Each council member votes, with `KIND` set exactly as it was for the submission. The proposal runs once 3 of 4 members have approved it.
-   ```bash
-   near contract call-function as-transaction peerfolio.sputnik-dao.near act_proposal json-args "{\"id\":<ID>,\"action\":\"VoteApprove\",\"proposal\":$KIND}" prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' sign-as $COUNCIL network-config mainnet sign-with-ledger --seed-phrase-hd-path "$HD_PATH" send
-   ```
+Record the commit and the factory's hex hash.
 
-### Release trading account code
+### Step 2: Rehearse on testnet
 
-1. Deploy the wasm as a global contract. Any account can pay. On mainnet it costs about 40 NEAR. Record the bs58 hash it prints.
+1. Deploy without calling `new`:
    ```bash
-   near contract deploy-as-global use-file contracts/target/near/trading_account/trading_account.wasm as-global-hash peerfolio.near network-config mainnet sign-with-keychain send
+   near contract deploy auth.peerfolio.testnet use-file contracts/target/near/trading_account_factory/trading_account_factory.wasm without-init-call network-config testnet sign-with-keychain send
    ```
-2. Point the factory at the new hash.
-   - Mainnet: a [DAO proposal](#dao-proposals) with
-     ```bash
-     export METHOD=set_global_code_hash
-     export ARGS=$(echo -n '{"code_hash_str":"<bs58 hash>"}' | base64 | tr -d '\n')
-     ```
-   - Testnet:
-     ```bash
-     near contract call-function as-transaction auth.peerfolio.testnet set_global_code_hash json-args '{"code_hash_str":"<bs58 hash>"}' prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' sign-as peerfolio.peerfolio.testnet network-config testnet sign-with-keychain send
-     ```
-3. Verify that the factory returns the new hash:
+2. Check the result:
+   - `near account view-account-summary auth.peerfolio.testnet network-config testnet now` shows the hex hash from step 1.
+   - These still return what they did before: `get_owner_id`, `get_signer_contract` and `get_proxy_code_base58_hash`.
    ```bash
-   near contract call-function as-read-only auth.peerfolio.near get_proxy_code_base58_hash json-args '{}' network-config mainnet now
+   near contract call-function as-read-only auth.peerfolio.testnet get_owner_id json-args '{}' network-config testnet now
    ```
-   A trading account created afterwards shows the same hash, in hex, under `Global Contract` in `near account view-account-summary <account> network-config mainnet now`. Compare it with `get_proxy_code_hash_hex`.
+3. Create a trading account to check the new factory code works (see [trading-account.md](trading-account.md#lifecycle), step 1).
 
-### Release factory code
+### Step 3: Add a temporary key to the mainnet factory
 
-A code-only redeploy keeps the factory's stored state. It only works if the new code reads the same stored fields. Mainnet steps:
-
-1. Generate a temporary key outside the repo:
+1. Generate the key outside the repo:
    ```bash
    export KEY_DIR=$(mktemp -d)
    near account create-account fund-later use-auto-generation save-to-folder $KEY_DIR
    export KEY_FILE=$(ls $KEY_DIR/*.json)
    export PUBKEY=$(jq -r .public_key $KEY_FILE)
    ```
-2. Pass a [DAO proposal](#dao-proposals) with
+2. Build the proposal. Set your own council account and Ledger path.
    ```bash
-   export METHOD=add_full_access_key
+   export COUNCIL=<your council account>
+   export HD_PATH="m/44'/397'/0'/0'/1'"
    export ARGS=$(echo -n "{\"public_key\":\"$PUBKEY\"}" | base64 | tr -d '\n')
+   export KIND='{"FunctionCall":{"receiver_id":"auth.peerfolio.near","actions":[{"method_name":"add_full_access_key","args":"'$ARGS'","deposit":"0","gas":"15000000000000"}]}}'
    ```
-   When it has run, check that the key is on the factory:
+3. Submit the proposal. The 0.1 NEAR is the proposal bond. The call returns the proposal ID.
+   ```bash
+   near contract call-function as-transaction peerfolio.sputnik-dao.near add_proposal json-args "{\"proposal\":{\"description\":\"Temporary key to deploy factory <commit>, hash <hex>\",\"kind\":$KIND}}" prepaid-gas '30.0 Tgas' attached-deposit '0.1 NEAR' sign-as $COUNCIL network-config mainnet sign-with-ledger --seed-phrase-hd-path "$HD_PATH" send
+   ```
+4. Check the proposal:
+   ```bash
+   near contract call-function as-read-only peerfolio.sputnik-dao.near get_proposal json-args '{"id":<ID>}' network-config mainnet now
+   ```
+5. Each council member votes. `KIND` must be exactly what was submitted, so share the `PUBKEY` value with the other voters; they set `ARGS` and `KIND` from it.
+   ```bash
+   near contract call-function as-transaction peerfolio.sputnik-dao.near act_proposal json-args "{\"id\":<ID>,\"action\":\"VoteApprove\",\"proposal\":$KIND}" prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' sign-as $COUNCIL network-config mainnet sign-with-ledger --seed-phrase-hd-path "$HD_PATH" send
+   ```
+6. After the third approval, check the key is on the factory:
    ```bash
    near account list-keys auth.peerfolio.near network-config mainnet now
    ```
-3. Deploy without calling `new`:
-   ```bash
-   near contract deploy auth.peerfolio.near use-file contracts/target/near/trading_account_factory/trading_account_factory.wasm without-init-call network-config mainnet sign-with-access-key-file $KEY_FILE send
-   ```
-4. Check that the summary shows the factory hex hash from `make release`, and that `get_owner_id`, `get_signer_contract` and `get_proxy_code_base58_hash` return the same values as before:
-   ```bash
-   near account view-account-summary auth.peerfolio.near network-config mainnet now
-   ```
-5. Delete the temporary key and remove its file:
-   ```bash
-   near account delete-keys auth.peerfolio.near public-keys $PUBKEY network-config mainnet sign-with-access-key-file $KEY_FILE send
-   rm -rf $KEY_DIR
-   ```
 
-On testnet the factory account has its own key in the keychain, so only steps 3 and 4 apply:
+### Step 4: Deploy on mainnet
 
 ```bash
-near contract deploy auth.peerfolio.testnet use-file contracts/target/near/trading_account_factory/trading_account_factory.wasm without-init-call network-config testnet sign-with-keychain send
+near contract deploy auth.peerfolio.near use-file contracts/target/near/trading_account_factory/trading_account_factory.wasm without-init-call network-config mainnet sign-with-access-key-file $KEY_FILE send
 ```
 
-### Deploy a new factory
+Then run the same checks as step 2.2 with `auth.peerfolio.near` and `network-config mainnet`.
 
-[`contracts/factory/deploy.sh`](../contracts/factory/deploy.sh) creates `auth.peerfolio.<near|testnet>` from `peerfolio.<near|testnet>` with 4 NEAR, then deploys the factory and calls `new`:
+### Step 5: Delete the temporary key
+
+Don't skip this. The factory should have no access keys.
 
 ```bash
-contracts/factory/deploy.sh peerfolio.sputnik-dao.near <bs58 global hash> mainnet
+near account delete-keys auth.peerfolio.near public-keys $PUBKEY network-config mainnet sign-with-access-key-file $KEY_FILE send
+rm -rf $KEY_DIR
+near account list-keys auth.peerfolio.near network-config mainnet now
 ```
 
-- `peerfolio.<near|testnet>`'s key has to be in your keychain. If that account uses a Ledger, temporarily add a keychain full-access key and delete it afterwards.
-- If the factory account already exists, the script only redeploys the code and ignores the owner and hash arguments.
-- When it finishes, it checks that the deployed code hash matches the local wasm.
-- Afterwards, update `AUTH_CREATOR` / `VITE_AUTH_CREATOR_*` in ft-core.
+## Deploy a new factory
+
+Use this only for a new factory account, for example when the factory's stored state changes. [`contracts/factory/deploy.sh`](../contracts/factory/deploy.sh) does it in one go:
+
+1. It creates `auth.peerfolio.<near|testnet>` from `peerfolio.<near|testnet>` with 4 NEAR.
+2. It deploys the factory wasm from `make release` and calls `new` with the owner, the network and the trading account code hash.
+3. It checks the deployed code hash matches the local wasm.
+
+```bash
+make release
+contracts/factory/deploy.sh peerfolio.sputnik-dao.near 6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f mainnet
+```
+
+That's how the live mainnet factory was deployed. Run it with `peerfolio.peerfolio.testnet` and `testnet` first.
+
+- The factory ID is hardcoded to `auth.peerfolio.<suffix>`. To use another ID, edit the script, and keep the ID at most 30 characters.
+- `peerfolio.<near|testnet>`'s key has to be in your keychain. If that account uses a Ledger, temporarily add a keychain full-access key, run the script, then delete the key.
+- The script uses near-cli-rs's legacy-compatible commands (`near deploy`, `near state`). In that syntax, `--deposit 1` means 1 NEAR, not 1 yoctoNEAR.
+- If the factory account already exists, the script only redeploys the code and ignores the owner and hash arguments. That doesn't work on mainnet, where the factory has no keys; use [Release factory code](#release-factory-code) instead.
+- The previous factory, `auth-v1.peerfolio.near`, was replaced in January 2026.
+
+Afterwards, point the app at the new factory: `AUTH_CREATOR` / `VITE_AUTH_CREATOR_*` in ft-core (local `.env`, Render and Cloudflare).

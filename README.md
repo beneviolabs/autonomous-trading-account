@@ -23,6 +23,9 @@ agent ──broadcast──▶ NEAR ──▶ wrap.near / intents.near (sent fro
 | MPC signer | `v1.signer` | `v1.signer-prod.testnet` |
 | Peerfolio agent | `bot.peerfolio.near` | none |
 
+- The previous mainnet factory, `auth-v1.peerfolio.near`, was replaced in January 2026.
+- ft-core configures the factory as `AUTH_CREATOR` / `VITE_AUTH_CREATOR_*`, and the agent as `AGENT_ACCOUNT_ID` / `VITE_AGENT_ACCOUNT_ID_*`. Its operational runbooks are in [`runbook/scenarios/automation_agent_account`](https://github.com/beneviolabs/ft-core/tree/main/runbook/scenarios/automation_agent_account).
+
 ## Terms
 
 - **Owner**: the user's NEAR implicit account (64 hex chars). It creates and controls its trading account.
@@ -34,20 +37,27 @@ Older code and method names say "proxy" for the trading account.
 
 ## Docs
 
-- [Trading account](docs/trading-account.md): security model, lifecycle and deleting an account.
-- [Factory](docs/factory.md): account naming, builds, and releasing either contract.
+- [Trading account](docs/trading-account.md): security model, lifecycle with commands, and deleting an account.
+- [Factory](docs/factory.md): account naming, builds, which release to run, and releasing the factory.
+- [Trading account release](docs/trading-account.md#release-new-trading-account-code): shipping new trading account code.
 - [Contract reference](docs/reference.md): methods, `request_signature` arguments and errors.
 - [Testing](docs/testing.md): local tests and CI.
 
 ## Development
 
-Requires rustup (the toolchain is pinned in `rust-toolchain.toml`), `cargo install cargo-near --version 0.16.0 --locked`, [near-cli-rs](https://github.com/near/near-cli-rs), and Docker for release builds.
+Prerequisites:
+- rustup. `rust-toolchain.toml` pins Rust 1.86, and rustup installs it automatically.
+- cargo-near 0.16.0: `cargo install cargo-near --version 0.16.0 --locked`. The build scripts refuse other versions.
+- [near-cli-rs](https://github.com/near/near-cli-rs), tested with 0.22. Run `near login` for each account you'll sign as.
+- Docker, for `make release` only.
 
 ```bash
 scripts/test.sh   # unit and integration tests
 make release      # reproducible wasm for deployment
 make help         # all targets
 ```
+
+The contracts form one Cargo workspace in `contracts/`, with a shared `Cargo.lock` and `target/`. To share code between them, add a library crate to the workspace that both depend on by path. Keep it to plain types; it must not define a `#[near]` contract. A good first candidate is the factory's `ProxyInitArgs`, which has to match the trading account's `new(owner_id, signer_id)`, and nothing checks that at compile time today.
 
 ## Audits
 
