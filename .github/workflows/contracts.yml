@@ -49,8 +49,9 @@ jobs:
       - name: Run clippy
         run: make clippy
 
+      # Unit tests, then a dev build and the sandbox integration tests (neard downloads at runtime).
       - name: Run tests
-        run: make test-unit
+        run: make test
 
       - name: Security audit
         run: make audit

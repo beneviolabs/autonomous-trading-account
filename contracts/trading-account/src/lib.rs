@@ -36,6 +36,8 @@ mod actions;
 mod integration_tests;
 mod models;
 mod serializer;
+#[cfg(test)]
+mod test_support;
 mod unit_tests;
 mod utils;
 

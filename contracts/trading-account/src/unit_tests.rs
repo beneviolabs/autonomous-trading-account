@@ -892,4 +892,53 @@ mod tests {
             "35000000696d706c696369745f3037343534663332313762393232396561643937373938632e617574682e70656572666f6c696f2e6e65617201903a9a9933ed92bdda3fcf30ac999060a5a0fa51c2b6c74838d3029a5aadefe038f7e4a91714f42bb5a2459a0d294be0cd047b4a999d6fd912702470f843271d2a0000000000000009000000777261702e6e656172070707070707070707070707070707070707070707070707070707070707070703000000020c0000006e6561725f6465706f7369740f0000007b2261223a5b312c322c2278225d7d00e057eb481b0000874b9f2ca8f258f1fd1e660000000000021000000066745f7472616e736665725f63616c6c020000007b7d00c06e31d91001000100000000000000000000000000000003ffffffffffffffffffffffffffffffff01000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f40"
         );
     }
+
+    // sign_request_callback with a response shaped like v1.signer's: it must parse the response,
+    // rebuild the transaction from request_signature's JSON and attach the signature.
+    fn callback_setup() -> (
+        TradingAccountContract,
+        omni_transaction::near::NearTransaction,
+        String,
+    ) {
+        use crate::test_support;
+
+        let mut context = get_context(accounts(1));
+        context.current_account_id(
+            "implicit_07454f3217b9229ead97798c.auth.peerfolio.near"
+                .parse()
+                .unwrap(),
+        );
+        testing_env!(context.build());
+        let contract = TradingAccountContract::new(accounts(1), "v1.signer".parse().unwrap());
+        let (tx, tx_json) = test_support::unsigned_tx(
+            &contract,
+            "wrap.near",
+            r#"[{"type":"FunctionCall","method_name":"near_deposit","args":{},"gas":"30000000000000","deposit":"50000000000000000000000"},{"type":"Transfer","deposit":"1"}]"#,
+            7,
+            [9u8; 32],
+        );
+        (contract, tx, tx_json)
+    }
+
+    #[test]
+    fn test_sign_request_callback_attaches_mpc_signature() {
+        let (mut contract, tx, tx_json) = callback_setup();
+        let (response, expected_signed) = crate::test_support::mpc_sign(&tx);
+
+        let signed_base64 = contract.sign_request_callback(Ok(response), tx_json);
+
+        let signed = near_sdk::base64::Engine::decode(
+            &near_sdk::base64::engine::general_purpose::STANDARD,
+            signed_base64,
+        )
+        .unwrap();
+        assert_eq!(signed, expected_signed);
+    }
+
+    #[test]
+    #[should_panic(expected = "Failed to parse the MPC's Signature response")]
+    fn test_sign_request_callback_signer_failure() {
+        let (mut contract, _, tx_json) = callback_setup();
+        contract.sign_request_callback(Err(near_sdk::PromiseError::Failed), tx_json);
+    }
 }

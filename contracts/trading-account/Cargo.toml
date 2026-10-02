@@ -43,3 +43,7 @@ near-workspaces = "0.23.0"
 tokio = { version = "1", features = ["full"] }
 serde_json = "1.0"
 anyhow = "1.0"
+# Signs test transactions the way the MPC signer does. Same version near-crypto already uses.
+secp256k1 = { version = "0.27", features = ["recovery"] }
+# Compiles the stub MPC signer in integration_tests.rs.
+wat = "1"
