@@ -38,10 +38,9 @@ Gotchas:
 
 ## CI
 
-`.github/workflows/contracts.yml` runs on a plain GitHub runner, with no custom image:
-1. Installs the toolchain from `rust-toolchain.toml`, cargo-near 0.22.0 and cargo-audit.
-2. Runs `make fmt-check`, `make clippy`, `make test` (unit and sandbox integration tests) and `make audit`.
-3. Runs `make release` (reproducible builds in NEAR's image), and checks both wasms are under 4 MiB. For pushes to `main` and manual runs, it uploads both wasms for [releases](releases.md#builds).
+`.github/workflows/contracts.yml` runs on plain GitHub runners, with no custom image, for pull requests and for pushes to `main`. It has two parallel jobs:
+- **`test`**: installs the toolchain from `rust-toolchain.toml`, cargo-near 0.22.0 and cargo-audit, then runs `make fmt-check`, `make clippy`, `make test` (unit and sandbox integration tests) and `make audit`. The neard sandbox binary is cached by version and passed in with `NEAR_SANDBOX_BIN_PATH`; when near-workspaces changes its default sandbox version, update `NEAR_SANDBOX_VERSION` in the workflow.
+- **`build`**: runs `make release` (reproducible builds in NEAR's image), and checks both wasms are under 4 MiB. For pushes to `main` and manual runs, it uploads both wasms for [releases](releases.md#builds).
 
 - Run any step locally with `make <target>`; `make help` lists them.
 - `cargo audit` ignores are in `contracts/.cargo/audit.toml`, each with a reason. `RUSTSEC-2026-0285` (`rustls`) only reaches test dependencies and can't be fixed until near-sdk moves to near-crypto 0.38. The dependency-review step in the workflow mirrors it.
