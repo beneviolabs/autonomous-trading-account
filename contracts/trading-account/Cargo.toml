@@ -23,7 +23,7 @@ integration-tests = []
 
 
 [dependencies]
-near-sdk = {version = "5.29.1", default-features = false, features = ["unit-testing", "unstable", "legacy"] }
+near-sdk = {version = "5.29.1", default-features = false, features = ["unstable", "legacy"] }
 borsh = "1.5.1"
 serde = { version = "1.0.214", features = ["derive"] }
 omni-transaction = { version = "0.5.0", default-features = false, features = ["near", "serde", "serde_json"] }
@@ -35,6 +35,8 @@ bs58 = "0.5.1"
 
 
 [dev-dependencies]
+# Mocked blockchain for unit tests only; keeps it out of the contract build.
+near-sdk = { version = "5.29.1", features = ["unit-testing"] }
 near-workspaces = "0.23.0"
 tokio = { version = "1", features = ["full"] }
 anyhow = "1.0"

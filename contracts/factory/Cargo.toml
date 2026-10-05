@@ -19,6 +19,10 @@ name = "trading_account_factory"
 path = "src/lib.rs"
 
 [dependencies]
-near-sdk = { version = "5.29.1", features = ["unit-testing", "unstable", "global-contracts"] }
+near-sdk = { version = "5.29.1", features = ["unstable", "global-contracts"] }
 hex = "0.4.3"
 bs58 = "0.5"
+
+[dev-dependencies]
+# Mocked blockchain for unit tests only; keeps it out of the contract build.
+near-sdk = { version = "5.29.1", features = ["unit-testing"] }

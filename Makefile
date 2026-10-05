@@ -19,8 +19,10 @@ build:
 fmt-check:
 	cd contracts && cargo fmt --all -- --check
 
+# --all-targets also lints the tests, and turns on near-sdk's unit-testing feature (a
+# dev-dependency) that a host build of a contract needs.
 clippy:
-	cd contracts && for p in $(PACKAGES); do cargo clippy -p $$p -- -D warnings || exit 1; done
+	cd contracts && for p in $(PACKAGES); do cargo clippy -p $$p --all-targets -- -D warnings || exit 1; done
 
 test-unit:
 	cd contracts && for p in $(PACKAGES); do cargo test -p $$p --lib || exit 1; done
