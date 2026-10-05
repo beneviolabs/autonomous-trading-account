@@ -6,7 +6,7 @@ The public methods of both contracts, with who may call them and what isn't obvi
 
 | Method | Caller | Notes |
 |---|---|---|
-| `new(owner_id, network, global_proxy_base58_hash)` | init | `network` is `"mainnet"` or `"testnet"` and picks the MPC signer; anything else panics. The hash is bs58 and is stored as raw 32 bytes, despite the field name `global_proxy_base58_hash`. |
+| `new(owner_id, network, global_proxy_base58_hash)` | init | `network` is `"mainnet"` or `"testnet"` and picks the MPC signer; anything else panics. The hash is bs58 and is stored as raw 32 bytes, despite the argument name `global_proxy_base58_hash`. |
 | `deposit_and_create_proxy_global(owner_id)` *payable* | `owner_id` itself | Creates `implicit_<24hex>.<factory>` with the global code and initializes it. The whole deposit becomes the trading account's balance. Refunds the deposit if creation fails. |
 | `create_proxy_global(owner_id)` *payable* | `owner_id` itself | Same, but with no minimum deposit and no refund. Don't call it directly. |
 | `get_base_account_name(owner_id)` | view | The `implicit_<24hex>` prefix for an owner. |

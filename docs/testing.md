@@ -19,8 +19,13 @@ cargo test -p trading-account --features integration-tests --lib integration_tes
 
 Test one package per command (`make test-unit` does). The contracts enable different near-sdk features, and `--workspace` would unify them.
 
+Writing tests:
+- Name them `test_<method>_<behaviour>`, for example `test_create_proxy_global_rejects_non_owner_predecessor`.
+- For a method that returns a `Promise`, drop the promise and check what it scheduled with `near_sdk::test_utils::get_created_receipts()`. Checking that a `Promise` came back proves nothing.
+
 What covers `request_signature`, the path that builds and signs transactions:
 - **`test_transaction_bytes_unchanged`** pins the bytes the MPC signs and the final signed transaction to what the audited version produced. If it fails after a dependency bump, the encoding or the JSON hand-off between `request_signature` and `sign_request_callback` changed. Don't update the expected values without finding out why.
+- **`create_signature_request` unit tests** pin the JSON sent to the MPC signer's `sign`, with the sha256 payload computed outside the contract.
 - **`sign_request_callback` unit tests** feed it a response in the real signer's format, signed with a fixed secp256k1 key by `test_support.rs` (success and signer failure).
 - **`test_request_signature_with_stub_signer`** runs the whole call in the sandbox with the documented minimum of 100 Tgas, using a tiny WAT contract in place of `v1.signer`.
 - Only a testnet run checks the real signer.

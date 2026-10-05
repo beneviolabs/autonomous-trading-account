@@ -2,7 +2,7 @@
 # Runs all tests locally: unit tests for both contracts, then the trading account's sandbox
 # integration tests. The integration tests embed
 # contracts/target/near/trading_account/trading_account.wasm at compile time, so the contract
-# is built first. CI runs only the unit tests (`make test-unit`).
+# is built first. CI runs this too (`make test`).
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT/contracts"
