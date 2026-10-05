@@ -1930,15 +1930,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "near-contract-standards"
-version = "5.29.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19050e45872e45cecb5a1b9d6e851f7776f4e4c9220a0caac0b8a21e3ca9f8a3"
-dependencies = [
- "near-sdk",
-]
-
-[[package]]
 name = "near-crypto"
 version = "0.37.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4004,15 +3995,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "borsh",
- "borsh-derive",
  "bs58 0.5.1",
  "hex",
- "near-contract-standards",
- "near-gas",
  "near-sdk",
  "near-workspaces",
  "omni-transaction",
- "once_cell",
  "schemars 0.8.22",
  "secp256k1",
  "serde",

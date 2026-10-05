@@ -1,292 +1,212 @@
-#[cfg(test)]
-mod contract_tests {
+use crate::test_support;
+use anyhow::Result;
+use near_workspaces::types::Gas;
+use near_workspaces::{AccountId, Contract, DevNetwork, Worker, operations::Function};
+use serde_json::json;
 
-    use anyhow::Result;
-    use near_sdk::AccountId;
-    use near_workspaces::{Account, Contract, DevNetwork, Worker, operations::Function};
-    use serde_json::json;
+const TRADING_ACCOUNT_WASM: &[u8] =
+    include_bytes!("../../target/near/trading_account/trading_account.wasm");
 
-    const WASM_FILEPATH: &[u8] =
-        include_bytes!("../../target/near/trading_account/trading_account.wasm");
+/// Deploys and initializes a trading account. Its owner is its own account, so
+/// `trading_account.call(...)` calls as the owner.
+async fn deploy_trading_account(worker: &Worker<impl DevNetwork>) -> Result<Contract> {
+    let trading_account = worker.dev_deploy(TRADING_ACCOUNT_WASM).await?;
+    trading_account
+        .call("new")
+        .args_json(json!({
+            "owner_id": trading_account.id(),
+            "signer_id": "v1.signer-prod.testnet",
+        }))
+        .transact()
+        .await?
+        .into_result()?;
+    Ok(trading_account)
+}
 
-    async fn init(worker: &Worker<impl DevNetwork>) -> Result<(Contract, Account)> {
-        let trading_account = worker.dev_deploy(WASM_FILEPATH).await?;
-        let owner = trading_account.as_account();
+async fn is_authorized(trading_account: &Contract, account_id: &AccountId) -> Result<bool> {
+    Ok(trading_account
+        .call("is_authorized")
+        .args_json(json!({ "account_id": account_id }))
+        .view()
+        .await?
+        .json()?)
+}
 
-        // Initialize the contract
-        let _result = trading_account
-            .call("new")
-            .args_json(json!({
-                "owner_id": owner.id(),
-                "signer_id": AccountId::try_from("v1.signer-prod.testnet".to_string()).unwrap()
-            }))
-            .transact()
-            .await?;
+#[tokio::test]
+async fn test_new_sets_owner() -> Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let trading_account = deploy_trading_account(&worker).await?;
 
-        Ok((trading_account.clone(), owner.clone()))
-    }
+    let owner_id: AccountId = trading_account.view("get_owner_id").await?.json()?;
+    assert_eq!(&owner_id, trading_account.id());
+    // is_authorized is also true for the owner.
+    assert!(is_authorized(&trading_account, &owner_id).await?);
+    Ok(())
+}
 
-    #[tokio::test]
-    async fn trading_account_initialization() -> Result<()> {
-        let worker = near_workspaces::sandbox().await?;
-        let (contract, owner) = init(&worker).await?;
+#[tokio::test]
+async fn test_add_and_remove_authorized_user() -> Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let trading_account = deploy_trading_account(&worker).await?;
+    let agent = worker.dev_create_account().await?;
 
-        let contract_owner = contract
-            .call("get_owner_id")
-            .view()
-            .await?
-            .json::<String>()?;
+    trading_account
+        .call("add_authorized_user")
+        .args_json(json!({ "account_id": agent.id() }))
+        .transact()
+        .await?
+        .into_result()?;
+    assert!(is_authorized(&trading_account, agent.id()).await?);
 
-        assert_eq!(
-            contract_owner,
-            owner.id().to_string(),
-            "Contract owner should match"
-        );
+    trading_account
+        .call("remove_authorized_user")
+        .args_json(json!({ "account_id": agent.id() }))
+        .transact()
+        .await?
+        .into_result()?;
+    assert!(!is_authorized(&trading_account, agent.id()).await?);
+    Ok(())
+}
 
-        // Test owner authorization
-        let result = contract
-            .call("is_authorized")
-            .args_json(json!({
-                "account_id": owner.id()
-            }))
-            .view()
-            .await?
-            .json::<bool>()?;
+#[tokio::test]
+async fn test_get_authorized_users() -> Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let trading_account = deploy_trading_account(&worker).await?;
+    let user1 = worker.dev_create_account().await?;
+    let user2 = worker.dev_create_account().await?;
 
-        assert!(result, "Owner should be authorized");
+    trading_account
+        .batch()
+        .call(Function::new("add_authorized_user").args_json(json!({ "account_id": user1.id() })))
+        .call(Function::new("add_authorized_user").args_json(json!({ "account_id": user2.id() })))
+        .transact()
+        .await?
+        .into_result()?;
 
-        Ok(())
-    }
+    let authorized_users: Vec<AccountId> =
+        trading_account.view("get_authorized_users").await?.json()?;
+    assert!(authorized_users.contains(user1.id()));
+    assert!(authorized_users.contains(user2.id()));
+    Ok(())
+}
 
-    #[tokio::test]
-    async fn test_add_authorized_user() -> Result<()> {
-        let worker = near_workspaces::sandbox().await?;
-        let (contract, _owner) = init(&worker).await?;
+#[tokio::test]
+async fn test_request_signature_rejects_unauthorized_caller() -> Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let trading_account = deploy_trading_account(&worker).await?;
+    let stranger = worker.dev_create_account().await?;
 
-        // Create a new account to authorize
-        let new_user = worker.dev_create_account().await?;
+    // A valid request, so only the caller check can reject it.
+    let outcome = stranger
+        .call(trading_account.id(), "request_signature")
+        .args_json(json!({
+            "contract_id": "wrap.testnet",
+            "actions_json": r#"[{"type":"FunctionCall","method_name":"near_deposit","args":{},"gas":"30000000000000","deposit":"1"}]"#,
+            "nonce": "1",
+            "block_hash": "11111111111111111111111111111111",
+            "mpc_signer_pk": test_support::mpc_public_key(),
+            "derivation_path": trading_account.id(),
+        }))
+        .gas(Gas::from_tgas(200))
+        .transact()
+        .await?;
 
-        // Add new user as authorized user
-        let _ = contract
-            .call("add_authorized_user")
-            .args_json(json!({
-                "account_id": new_user.id()
-            }))
-            .transact()
-            .await?;
+    assert!(outcome.is_failure());
+    let failures = format!("{:?}", outcome.failures());
+    assert!(
+        failures.contains("Unauthorized: only authorized users can request signatures"),
+        "{}",
+        failures
+    );
+    Ok(())
+}
 
-        // Verify the user is authorized
-        let is_authorized = contract
-            .call("is_authorized")
-            .args_json(json!({
-                "account_id": new_user.id()
-            }))
-            .view()
-            .await?
-            .json::<bool>()?;
+// Stands in for v1.signer: `set_response` stores the call's input, and `sign` returns it.
+const STUB_SIGNER_WAT: &str = r#"(module
+  (import "env" "input" (func $input (param i64)))
+  (import "env" "register_len" (func $register_len (param i64) (result i64)))
+  (import "env" "read_register" (func $read_register (param i64 i64)))
+  (import "env" "storage_write" (func $storage_write (param i64 i64 i64 i64 i64) (result i64)))
+  (import "env" "storage_read" (func $storage_read (param i64 i64 i64) (result i64)))
+  (import "env" "value_return" (func $value_return (param i64 i64)))
+  (memory (export "memory") 1)
+  (data (i32.const 0) "r")
+  (func (export "set_response")
+    (call $input (i64.const 0))
+    (call $read_register (i64.const 0) (i64.const 1024))
+    (drop (call $storage_write (i64.const 1) (i64.const 0)
+      (call $register_len (i64.const 0)) (i64.const 1024) (i64.const 1))))
+  (func (export "sign")
+    (drop (call $storage_read (i64.const 1) (i64.const 0) (i64.const 0)))
+    (call $read_register (i64.const 0) (i64.const 1024))
+    (call $value_return (call $register_len (i64.const 0)) (i64.const 1024))))"#;
 
-        assert!(is_authorized, "New user should be authorized");
-        Ok(())
-    }
+// The full request_signature -> signer -> sign_request_callback path, with the minimum gas
+// the docs promise is enough. The real signer's signature format is only checked on testnet.
+#[tokio::test]
+async fn test_request_signature_with_stub_signer() -> Result<()> {
+    use crate::TradingAccountContract;
+    use near_sdk::{test_utils::VMContextBuilder, testing_env};
 
-    #[tokio::test]
-    async fn test_remove_authorized_user() -> Result<()> {
-        let worker = near_workspaces::sandbox().await?;
-        let (contract, _owner) = init(&worker).await?;
+    let worker = near_workspaces::sandbox().await?;
+    let signer = worker.dev_deploy(&wat::parse_str(STUB_SIGNER_WAT)?).await?;
+    let trading_account = worker.dev_deploy(TRADING_ACCOUNT_WASM).await?;
+    trading_account
+        .call("new")
+        .args_json(json!({ "owner_id": trading_account.id(), "signer_id": signer.id() }))
+        .transact()
+        .await?
+        .into_result()?;
+    let agent = worker.dev_create_account().await?;
+    trading_account
+        .call("add_authorized_user")
+        .args_json(json!({ "account_id": agent.id() }))
+        .transact()
+        .await?
+        .into_result()?;
 
-        // Create and authorize a new user
-        let user = worker.dev_create_account().await?;
-        let _ = contract
-            .call("add_authorized_user")
-            .args_json(json!({
-                "account_id": user.id()
-            }))
-            .transact()
-            .await?;
+    let actions_json = r#"[{"type":"FunctionCall","method_name":"near_deposit","args":{},"gas":"30000000000000","deposit":"50000000000000000000000"}]"#;
+    let nonce = 5;
 
-        // Remove authorization
-        let _ = contract
-            .call("remove_authorized_user")
-            .args_json(json!({
-                "account_id": user.id()
-            }))
-            .transact()
-            .await?;
+    // The transaction the contract will build, signed with the test MPC key.
+    testing_env!(
+        VMContextBuilder::new()
+            .current_account_id(trading_account.id().as_str().parse()?)
+            .build()
+    );
+    let mock = TradingAccountContract::new(
+        trading_account.id().as_str().parse()?,
+        signer.id().as_str().parse()?,
+    );
+    let (tx, _) = test_support::unsigned_tx(&mock, "wrap.near", actions_json, nonce, [0u8; 32]);
+    let (response, expected_signed) = test_support::mpc_sign(&tx);
+    signer
+        .call("set_response")
+        .args_json(response)
+        .transact()
+        .await?
+        .into_result()?;
 
-        // Verify user is no longer authorized
-        let is_authorized = contract
-            .call("is_authorized")
-            .args_json(json!({
-                "account_id": user.id()
-            }))
-            .view()
-            .await?
-            .json::<bool>()?;
+    let outcome = agent
+        .call(trading_account.id(), "request_signature")
+        .args_json(json!({
+            "contract_id": "wrap.near",
+            "actions_json": actions_json,
+            "nonce": nonce.to_string(),
+            "block_hash": "11111111111111111111111111111111",
+            "mpc_signer_pk": test_support::mpc_public_key(),
+            "derivation_path": trading_account.id(),
+        }))
+        .deposit(near_workspaces::types::NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+    assert!(outcome.is_success(), "{:#?}", outcome.failures());
 
-        assert!(!is_authorized, "User should no longer be authorized");
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_request_signature_unauthorized() -> Result<()> {
-        let worker = near_workspaces::sandbox().await?;
-        let (contract, _) = init(&worker).await?;
-
-        // Create unauthorized user
-        let unauthorized_user = worker.dev_create_account().await?;
-
-        // Attempt signature request as unauthorized user
-        let result = unauthorized_user
-            .call(contract.id(), "request_signature")
-            .args_json(json!({
-                "contract_id": "wrap.testnet",
-                "actions_json": "[{\"type\":\"FunctionCall\", \"deposit\": \"50000000000000000000000\", \"gas\": \"300000000000000\", \"method_name\": \"near_deposit\", \"args\": \"\"}]",
-                "nonce": "1",
-                // bs58 for 32 zero bytes, the block hash unsigned_tx used above.
-                "block_hash": "11111111111111111111111111111111",
-                "mpc_signer_pk":"ed25519:asdf".to_string(),
-                "derivation_path": "agent.auth-factory.appaccount.testnet".to_string(),
-
-            }))
-            .gas(near_workspaces::types::Gas::from_tgas(200))
-            .transact()
-            .await;
-
-        println!("Result: {:?}", result);
-        // Check status before unwrapping
-        let is_ok = result.is_ok();
-        // Unwrap the error since we expect this to fail
-        let final_result = result.unwrap();
-        assert!(is_ok);
-        assert!(final_result.is_failure());
-        let err_msg = format!("{:?}", final_result.failures());
-        assert!(
-            err_msg.contains("Unauthorized: only authorized users can request signatures"),
-            "Expected 'Unauthorized:...' error, got: {}",
-            err_msg
-        );
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_get_authorized_users() -> Result<()> {
-        let worker = near_workspaces::sandbox().await?;
-        let (contract, _owner) = init(&worker).await?;
-
-        // Add multiple users
-        let user1 = worker.dev_create_account().await?;
-        let user2 = worker.dev_create_account().await?;
-
-        let _ = contract
-            .batch()
-            .call(
-                Function::new("add_authorized_user").args_json(json!({ "account_id": user1.id() })),
-            )
-            .call(
-                Function::new("add_authorized_user").args_json(json!({ "account_id": user2.id() })),
-            )
-            .transact()
-            .await?;
-
-        // Get all authorized users
-        let authorized_users = contract
-            .call("get_authorized_users")
-            .view()
-            .await?
-            .json::<Vec<String>>()?;
-
-        assert!(authorized_users.contains(&user1.id().to_string()));
-        assert!(authorized_users.contains(&user2.id().to_string()));
-        Ok(())
-    }
-
-    // Stands in for v1.signer: `set_response` stores the call's input, and `sign` returns it.
-    const STUB_SIGNER_WAT: &str = r#"(module
-      (import "env" "input" (func $input (param i64)))
-      (import "env" "register_len" (func $register_len (param i64) (result i64)))
-      (import "env" "read_register" (func $read_register (param i64 i64)))
-      (import "env" "storage_write" (func $storage_write (param i64 i64 i64 i64 i64) (result i64)))
-      (import "env" "storage_read" (func $storage_read (param i64 i64 i64) (result i64)))
-      (import "env" "value_return" (func $value_return (param i64 i64)))
-      (memory (export "memory") 1)
-      (data (i32.const 0) "r")
-      (func (export "set_response")
-        (call $input (i64.const 0))
-        (call $read_register (i64.const 0) (i64.const 1024))
-        (drop (call $storage_write (i64.const 1) (i64.const 0)
-          (call $register_len (i64.const 0)) (i64.const 1024) (i64.const 1))))
-      (func (export "sign")
-        (drop (call $storage_read (i64.const 1) (i64.const 0) (i64.const 0)))
-        (call $read_register (i64.const 0) (i64.const 1024))
-        (call $value_return (call $register_len (i64.const 0)) (i64.const 1024))))"#;
-
-    // The full request_signature -> signer -> sign_request_callback path, with the minimum gas
-    // the docs promise is enough. The real signer's signature format is only checked on testnet.
-    #[tokio::test]
-    async fn test_request_signature_with_stub_signer() -> Result<()> {
-        use crate::{TradingAccountContract, test_support};
-        use near_sdk::{test_utils::VMContextBuilder, testing_env};
-
-        let worker = near_workspaces::sandbox().await?;
-        let signer = worker.dev_deploy(&wat::parse_str(STUB_SIGNER_WAT)?).await?;
-        let trading_account = worker.dev_deploy(WASM_FILEPATH).await?;
-        trading_account
-            .call("new")
-            .args_json(json!({ "owner_id": trading_account.id(), "signer_id": signer.id() }))
-            .transact()
-            .await?
-            .into_result()?;
-        let agent = worker.dev_create_account().await?;
-        trading_account
-            .call("add_authorized_user")
-            .args_json(json!({ "account_id": agent.id() }))
-            .transact()
-            .await?
-            .into_result()?;
-
-        let actions_json = r#"[{"type":"FunctionCall","method_name":"near_deposit","args":{},"gas":"30000000000000","deposit":"50000000000000000000000"}]"#;
-        let nonce = 5;
-
-        // The transaction the contract will build, signed with the test MPC key.
-        testing_env!(
-            VMContextBuilder::new()
-                .current_account_id(trading_account.id().as_str().parse()?)
-                .build()
-        );
-        let mock = TradingAccountContract::new(
-            trading_account.id().as_str().parse()?,
-            signer.id().as_str().parse()?,
-        );
-        let (tx, _) = test_support::unsigned_tx(&mock, "wrap.near", actions_json, nonce, [0u8; 32]);
-        let (response, expected_signed) = test_support::mpc_sign(&tx);
-        signer
-            .call("set_response")
-            .args_json(response)
-            .transact()
-            .await?
-            .into_result()?;
-
-        let outcome = agent
-            .call(trading_account.id(), "request_signature")
-            .args_json(json!({
-                "contract_id": "wrap.near",
-                "actions_json": actions_json,
-                "nonce": nonce.to_string(),
-                "block_hash": "11111111111111111111111111111111",
-                "mpc_signer_pk": test_support::mpc_public_key(),
-                "derivation_path": trading_account.id(),
-            }))
-            .deposit(near_workspaces::types::NearToken::from_yoctonear(1))
-            .gas(near_workspaces::types::Gas::from_tgas(100))
-            .transact()
-            .await?;
-        assert!(outcome.is_success(), "{:#?}", outcome.failures());
-
-        let signed = near_sdk::base64::Engine::decode(
-            &near_sdk::base64::engine::general_purpose::STANDARD,
-            outcome.json::<String>()?,
-        )?;
-        assert_eq!(signed, expected_signed);
-        Ok(())
-    }
+    let signed = near_sdk::base64::Engine::decode(
+        &near_sdk::base64::engine::general_purpose::STANDARD,
+        outcome.json::<String>()?,
+    )?;
+    assert_eq!(signed, expected_signed);
+    Ok(())
 }

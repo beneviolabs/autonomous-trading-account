@@ -12,7 +12,7 @@ mod unit_tests;
 #[derive(PanicOnDefault)]
 pub struct TradingAccountFactory {
     signer_contract: AccountId,
-    global_proxy_base58_hash: Vec<u8>,
+    global_code_hash: Vec<u8>,
     owner_id: AccountId,
 }
 
@@ -32,7 +32,7 @@ impl TradingAccountFactory {
 
         Self {
             signer_contract,
-            global_proxy_base58_hash: Self::decode_code_hash(&global_proxy_base58_hash),
+            global_code_hash: Self::decode_code_hash(&global_proxy_base58_hash),
             owner_id,
         }
     }
@@ -71,19 +71,19 @@ impl TradingAccountFactory {
             full_sub_account,
             owner_id,
             self.signer_contract,
-            bs58::encode(&self.global_proxy_base58_hash).into_string()
+            bs58::encode(&self.global_code_hash).into_string()
         ));
 
         Promise::new(full_sub_account.clone())
             .create_account()
             .transfer(env::attached_deposit())
             .use_global_contract(
-                <[u8; 32]>::try_from(self.global_proxy_base58_hash.clone())
+                <[u8; 32]>::try_from(self.global_code_hash.clone())
                     .expect("global code hash is 32 bytes"),
             )
             .function_call(
                 "new".to_string(),
-                near_sdk::serde_json::to_vec(&ProxyInitArgs {
+                near_sdk::serde_json::to_vec(&TradingAccountInitArgs {
                     owner_id,
                     signer_id: self.signer_contract.clone(),
                 })
@@ -162,7 +162,7 @@ impl TradingAccountFactory {
     pub fn set_global_code_hash(&mut self, code_hash_str: String) {
         self.assert_owner();
 
-        self.global_proxy_base58_hash = Self::decode_code_hash(&code_hash_str);
+        self.global_code_hash = Self::decode_code_hash(&code_hash_str);
 
         env::log_str(&format!(
             "Global proxy code hash updated to: {}",
@@ -189,11 +189,11 @@ impl TradingAccountFactory {
     }
 
     pub fn get_proxy_code_base58_hash(&self) -> String {
-        bs58::encode(&self.global_proxy_base58_hash).into_string()
+        bs58::encode(&self.global_code_hash).into_string()
     }
 
     pub fn get_proxy_code_hash_hex(&self) -> String {
-        hex::encode(&self.global_proxy_base58_hash)
+        hex::encode(&self.global_code_hash)
     }
 
     pub fn get_signer_contract(&self) -> AccountId {
@@ -201,9 +201,11 @@ impl TradingAccountFactory {
     }
 }
 
+/// Arguments of the trading account's `new(owner_id, signer_id)`. Nothing checks at compile time
+/// that they match `TradingAccountContract::new` in contracts/trading-account.
 #[derive(Serialize)]
 #[serde(crate = "near_sdk::serde")]
-struct ProxyInitArgs {
+struct TradingAccountInitArgs {
     owner_id: AccountId,
     signer_id: AccountId,
 }

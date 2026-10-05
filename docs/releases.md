@@ -17,7 +17,7 @@ Both write to `contracts/target/near/<crate>/<crate>.wasm`:
 - **Get release wasm from CI.** The `contracts` workflow runs `make release`, prints each wasm's SHA-256 (hex and bs58) in its log, and uploads both wasms as the `contract-wasm` artifact, kept for 90 days.
   - CI uploads the artifact only for pushes to `main` and for manual runs. Pull request and other branch runs build and test but don't upload.
   - Mainnet releases come from `main`. A manual run on a branch (`gh workflow run contracts.yml --ref <branch>`) is for testnet rehearsals only.
-  - CI only runs on pushes that touch contract files. Otherwise, start a run with `gh workflow run contracts.yml --ref main`.
+  - CI runs on pull requests and on pushes to `main` that touch contract files. Otherwise, start a run with `gh workflow run contracts.yml --ref main`.
 - **`make release` locally** needs Docker and a clean tree with everything committed, including `Cargo.lock`. NEAR's build images are x86-only, so on Apple Silicon Docker emulates them and the build is slow. Use it to check a CI hash independently, not as the usual route.
 - **To change the build image**, update `image` and `image_digest` in both crates together. That changes both hashes.
 - **Dev builds aren't reproducible.** They compile natively, and the same commit produces different code on macOS arm64 and on Linux x86_64.

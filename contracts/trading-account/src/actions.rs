@@ -1,18 +1,4 @@
-use near_sdk::{AccountId, Gas, NearToken, near};
-
-#[near(serializers = [json, borsh])]
-#[derive(Clone)]
-pub struct NearAction {
-    pub method_name: Option<String>,
-    pub contract_id: AccountId,
-    pub gas_attached: Gas,
-    pub deposit_attached: NearToken,
-}
-#[derive(Debug, PartialEq)]
-pub enum ActionValidationError {
-    ContractNotAllowed(String),
-    MethodNotAllowed(String),
-}
+use near_sdk::AccountId;
 
 const ALLOWED_CONTRACTS: &[&str] = &["wrap.near", "intents.near", "wrap.testnet"];
 const ALLOWED_METHODS: &[&str] = &[
@@ -24,25 +10,20 @@ const ALLOWED_METHODS: &[&str] = &[
     "ft_withdraw",
 ];
 
-impl NearAction {
-    pub fn is_allowed(&self) -> Result<(), ActionValidationError> {
-        // Check if contract address is allowed
-        let contract_str = self.contract_id.as_str();
-        if !ALLOWED_CONTRACTS.contains(&contract_str) {
-            return Err(ActionValidationError::ContractNotAllowed(format!(
-                "{} is not allowed. Only {:?} are permitted",
-                self.contract_id, ALLOWED_CONTRACTS
-            )));
-        }
-        // Check if method is allowed
-        if let Some(method) = &self.method_name
-            && !ALLOWED_METHODS.contains(&method.as_str())
-        {
-            return Err(ActionValidationError::MethodNotAllowed(format!(
-                "Method {} is restricted. Allowed methods: {:?}",
-                method, ALLOWED_METHODS
-            )));
-        }
-        Ok(())
+/// Checks a function call against the allowlist. Every allowed method is allowed on every allowed
+/// contract, and the arguments aren't checked.
+pub fn check_allowlist(contract_id: &AccountId, method_name: &str) -> Result<(), String> {
+    if !ALLOWED_CONTRACTS.contains(&contract_id.as_str()) {
+        return Err(format!(
+            "{} is not allowed. Only {:?} are permitted",
+            contract_id, ALLOWED_CONTRACTS
+        ));
     }
+    if !ALLOWED_METHODS.contains(&method_name) {
+        return Err(format!(
+            "Method {} is restricted. Allowed methods: {:?}",
+            method_name, ALLOWED_METHODS
+        ));
+    }
+    Ok(())
 }

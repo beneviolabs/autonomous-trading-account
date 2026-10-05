@@ -1,15 +1,11 @@
-#![allow(clippy::too_many_arguments)]
-
-use actions::NearAction;
-use near_gas::NearGas;
 use near_sdk::base64;
 use near_sdk::collections::UnorderedSet;
 
-use near_sdk::ext_contract;
 use near_sdk::json_types::{Base58CryptoHash, U64};
-use near_sdk::serde::{Deserialize, Serialize};
+use near_sdk::serde::Deserialize;
 use near_sdk::{
-    AccountId, Gas, NearToken, PanicOnDefault, Promise, PromiseError, PublicKey, env, near,
+    AccountId, AccountIdRef, Gas, NearToken, PanicOnDefault, Promise, PromiseError, PublicKey, env,
+    near,
 };
 
 use omni_transaction::TransactionBuilder;
@@ -24,10 +20,6 @@ use omni_transaction::{
     },
 };
 
-use once_cell::sync::Lazy;
-static NEAR_INTENTS_ADDRESS: Lazy<AccountId> = Lazy::new(|| "intents.near".parse().unwrap());
-
-use crate::actions::ActionValidationError;
 pub use crate::models::*;
 pub use crate::serializer::SafeU128;
 
@@ -38,15 +30,16 @@ mod models;
 mod serializer;
 #[cfg(test)]
 mod test_support;
+#[cfg(test)]
 mod unit_tests;
 mod utils;
 
-// Constants
 const GAS_FOR_REQUEST_SIGNATURE: Gas = Gas::from_tgas(100);
 const BASE_GAS: Gas = Gas::from_tgas(10); // Base gas for contract execution
 const CALLBACK_GAS: Gas = Gas::from_tgas(10); // Gas reserved for callback
 const NEAR_MPC_DOMAIN_ID: u32 = 0;
 const MAX_AUTHORIZED_USERS: u64 = 10; // Maximum number of authorized users per trading account
+const NEAR_INTENTS_ADDRESS: &AccountIdRef = AccountIdRef::new_or_panic("intents.near");
 
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
@@ -56,7 +49,7 @@ pub struct TradingAccountContract {
     signer_id: AccountId,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 #[serde(tag = "type")]
 pub enum ActionString {
     FunctionCall {
@@ -68,14 +61,6 @@ pub enum ActionString {
     Transfer {
         deposit: String,
     },
-}
-
-#[ext_contract(ext_self)]
-pub trait ExtSelf {
-    fn callback_method(
-        &mut self,
-        #[callback_result] call_result: Result<SignatureResponse, PromiseError>,
-    );
 }
 
 #[near]
@@ -177,31 +162,20 @@ impl TradingAccountContract {
                     gas,
                     deposit,
                 } => {
-                    let gas_u64 = U64::from(gas.parse::<u64>().map_err(|_| "Invalid gas format")?);
+                    let gas = Gas::from_gas(gas.parse().map_err(|_| "Invalid gas format")?);
                     let deposit_near = NearToken::from_yoctonear(
                         deposit.parse().map_err(|_| "Invalid deposit format")?,
                     );
                     let safe_deposit = SafeU128(deposit_near.as_yoctonear());
-                    // Verify action is allowed
-                    let near_action = NearAction {
-                        method_name: Some(method_name.clone()),
-                        contract_id: contract_id.clone(),
-                        gas_attached: NearGas::from_gas(gas_u64.0),
-                        deposit_attached: deposit_near,
-                    };
-                    near_action.is_allowed().map_err(|e| match e {
-                        ActionValidationError::ContractNotAllowed(msg) => msg,
-                        ActionValidationError::MethodNotAllowed(msg) => msg,
-                    })?;
+                    actions::check_allowlist(contract_id, &method_name)?;
 
-                    // Convert args to bytes
                     let args_bytes = serde_json::to_vec(&args)
                         .map_err(|e| format!("Failed to serialize args: {}", e))?;
 
                     Ok(OmniAction::FunctionCall(Box::new(OmniFunctionCallAction {
                         method_name,
                         args: args_bytes,
-                        gas: NearGas::from_gas(gas_u64.0),
+                        gas,
                         deposit: NearToken::from_yoctonear(safe_deposit.0),
                     })))
                 }
@@ -234,7 +208,7 @@ impl TradingAccountContract {
                 ecdsa: hex::encode(hashed_payload),
             },
             path: derivation_path,
-            domain_id: domain_id.unwrap_or(NEAR_MPC_DOMAIN_ID), // domain_id != 0 requies a transaction payload for the target chain e.g. SOL
+            domain_id: domain_id.unwrap_or(NEAR_MPC_DOMAIN_ID), // domain_id != 0 requires a transaction payload for the target chain e.g. SOL
         };
 
         serde_json::json!({ "request": sign_request })
@@ -255,6 +229,7 @@ impl TradingAccountContract {
 
     // Request a signature from the MPC signer
     #[payable]
+    #[allow(clippy::too_many_arguments)]
     pub fn request_signature(
         &mut self,
         contract_id: AccountId,
@@ -417,7 +392,7 @@ impl TradingAccountContract {
         );
         let request_payload = serde_json::json!({ "public_key": public_key });
         self.add_full_access_key(public_key).then(
-            Promise::new(NEAR_INTENTS_ADDRESS.clone()).function_call(
+            Promise::new(NEAR_INTENTS_ADDRESS.to_owned()).function_call(
                 "add_public_key".to_string(),
                 near_sdk::serde_json::to_vec(&request_payload)
                     .expect("Failed to serialize public key payload"),
@@ -430,7 +405,7 @@ impl TradingAccountContract {
     #[private] // Only callable by the contract itself
     pub fn sign_request_callback(
         &mut self,
-        #[callback_result] call_result: Result<SignatureResponse, PromiseError>,
+        #[callback_result] call_result: Result<EcdsaSignatureResponse, PromiseError>,
         tx_json_string: String,
     ) -> String {
         let response = match call_result {

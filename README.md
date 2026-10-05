@@ -33,7 +33,7 @@ agent ──broadcast──▶ NEAR ──▶ wrap.near / intents.near (sent fro
 - **MPC key**: the key NEAR's MPC signer derives for a trading account. It's added as a full-access key on the trading account and signs every agent transaction.
 - **Global code hash**: the hash of the trading account code deployed once as a [NEP-591 global contract](https://github.com/near/NEPs/blob/master/neps/nep-0591.md). The factory creates new trading accounts with it.
 
-Older code and method names say "proxy" for the trading account.
+Some on-chain names still say "proxy" for the trading account: factory methods such as `create_proxy_global`, the factory's `global_proxy_base58_hash` argument, and some log messages. Code identifiers use the terms above.
 
 ## Docs
 
@@ -57,7 +57,7 @@ make release      # reproducible release build (CI runs it too)
 make help         # all targets
 ```
 
-The contracts form one Cargo workspace in `contracts/`, with a shared `Cargo.lock` and `target/`. To share code between them, add a library crate to the workspace that both depend on by path. Keep it to plain types; it must not define a `#[near]` contract. A good first candidate is the factory's `ProxyInitArgs`, which has to match the trading account's `new(owner_id, signer_id)`, and nothing checks that at compile time today.
+The contracts form one Cargo workspace in `contracts/`, with a shared `Cargo.lock` and `target/`. To share code between them, add a library crate to the workspace that both depend on by path. Keep it to plain types; it must not define a `#[near]` contract. A good first candidate is the factory's `TradingAccountInitArgs`, which has to match the trading account's `new(owner_id, signer_id)`. Today only a factory unit test checks the arguments the factory sends.
 
 ## Audits
 
