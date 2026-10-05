@@ -24,10 +24,7 @@ integration-tests = []
 
 [dependencies]
 near-sdk = {version = "5.29.1", default-features = false, features = ["unit-testing", "unstable", "legacy"] }
-near-contract-standards = "5.29.1"
-near-gas = "0.3.0"
 borsh = "1.5.1"
-borsh-derive = "1.5.1"
 serde = { version = "1.0.214", features = ["derive"] }
 omni-transaction = { version = "0.5.0", default-features = false, features = ["near", "serde", "serde_json"] }
 sha2 = "0.10.8"
@@ -35,13 +32,11 @@ serde_json = "1.0"
 hex = "0.4.3"
 schemars = "0.8.22"
 bs58 = "0.5.1"
-once_cell = "1.21.3"
 
 
 [dev-dependencies]
 near-workspaces = "0.23.0"
 tokio = { version = "1", features = ["full"] }
-serde_json = "1.0"
 anyhow = "1.0"
 # Signs test transactions the way the MPC signer does. Same version near-crypto already uses.
 secp256k1 = { version = "0.27", features = ["recovery"] }

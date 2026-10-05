@@ -6,7 +6,7 @@ use omni_transaction::near::types::{Action, BlockHash, PublicKey, Signature, U64
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug, JsonSchema, BorshSerialize, BorshDeserialize)]
+#[derive(Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct EcdsaPayload {
     pub ecdsa: String,
@@ -30,10 +30,7 @@ pub struct EcdsaSignatureResponse {
     pub recovery_id: u8,
 }
 
-// Alias for backwards compatibility and clearer naming
-pub type SignatureResponse = EcdsaSignatureResponse;
-
-#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
+#[derive(Serialize)]
 pub struct SignRequest {
     pub payload_v2: EcdsaPayload,
     pub path: String,

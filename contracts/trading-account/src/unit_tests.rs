@@ -1,9 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::{
-        ActionString, BigR, EcdsaSignatureResponse, ScalarValue, SignatureResponse,
-        TradingAccountContract,
-    };
+    use crate::{ActionString, BigR, EcdsaSignatureResponse, ScalarValue, TradingAccountContract};
     use near_sdk::PublicKey;
     use near_sdk::{
         AccountId,
@@ -327,7 +324,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&ecdsa_response).unwrap();
-        let decoded: SignatureResponse = serde_json::from_str(&json).unwrap();
+        let decoded: EcdsaSignatureResponse = serde_json::from_str(&json).unwrap();
 
         assert_eq!(decoded.scheme, "Secp256k1");
         assert_eq!(decoded.recovery_id, 1);

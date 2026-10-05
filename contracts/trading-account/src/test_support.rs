@@ -1,7 +1,7 @@
 // Shared by the unit and sandbox tests: rebuilds the transaction request_signature builds, and
 // signs it the way the MPC signer does, so the callback's ecrecover check passes.
 use crate::TradingAccountContract;
-use crate::models::SignatureResponse;
+use crate::models::EcdsaSignatureResponse;
 use omni_transaction::near::NearTransaction;
 use omni_transaction::near::types::{
     Action, BlockHash, Secp256K1Signature, Signature, U128 as OmniU128,
@@ -69,7 +69,7 @@ pub fn callback_json(
 }
 
 /// What the MPC signer returns for `tx`, and the signed transaction the callback should build.
-pub fn mpc_sign(tx: &NearTransaction) -> (SignatureResponse, Vec<u8>) {
+pub fn mpc_sign(tx: &NearTransaction) -> (EcdsaSignatureResponse, Vec<u8>) {
     let hash = crate::utils::hash_payload(&tx.build_for_signing());
     let secret = SecretKey::from_slice(&TEST_MPC_SECRET_KEY).unwrap();
     let (recovery_id, rs) = Secp256k1::new()
@@ -78,7 +78,7 @@ pub fn mpc_sign(tx: &NearTransaction) -> (SignatureResponse, Vec<u8>) {
     let v = recovery_id.to_i32() as u8;
 
     // Same shape as v1.signer's response: big_r is the compressed R point, upper-case hex.
-    let response: SignatureResponse = serde_json::from_value(serde_json::json!({
+    let response: EcdsaSignatureResponse = serde_json::from_value(serde_json::json!({
         "scheme": "Secp256k1",
         "big_r": { "affine_point": format!("{:02X}{}", 2 + (v & 1), hex::encode_upper(&rs[..32])) },
         "s": { "scalar": hex::encode_upper(&rs[32..]) },
