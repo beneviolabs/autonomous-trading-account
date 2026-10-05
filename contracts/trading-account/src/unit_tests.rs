@@ -499,8 +499,14 @@ fn test_transaction_bytes_unchanged() {
     let expected_for_signing = "35000000696d706c696369745f3037343534663332313762393232396561643937373938632e617574682e70656572666f6c696f2e6e65617201903a9a9933ed92bdda3fcf30ac999060a5a0fa51c2b6c74838d3029a5aadefe038f7e4a91714f42bb5a2459a0d294be0cd047b4a999d6fd912702470f843271d2a0000000000000009000000777261702e6e656172070707070707070707070707070707070707070707070707070707070707070703000000020c0000006e6561725f6465706f7369740f0000007b2261223a5b312c322c2278225d7d00e057eb481b0000874b9f2ca8f258f1fd1e660000000000021000000066745f7472616e736665725f63616c6c020000007b7d00c06e31d91001000100000000000000000000000000000003ffffffffffffffffffffffffffffffff";
     assert_eq!(hex::encode(tx.build_for_signing()), expected_for_signing);
 
-    // Same round trip as request_signature -> sign_request_callback.
+    // Same round trip as request_signature -> sign_request_callback. The JSON is pinned too: a
+    // callback scheduled before an upgrade is deserialized by the new code, so changing this
+    // JSON breaks requests in flight during the upgrade.
     let tx_json = serde_json::to_string(&tx).unwrap();
+    assert_eq!(
+        tx_json,
+        r#"{"signer_id":"implicit_07454f3217b9229ead97798c.auth.peerfolio.near","public_key":"secp256k1:3tFRbMqmoa6AAALMrEFAYCEoHcqKxeW38YptwowBVBtXK1vo36HDbUWuR6EZmoK4JcH6HDkNMGGqP1ouV7VZUWya","nonce":42,"receiver_id":"wrap.near","block_hash":"US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx","actions":[{"FunctionCall":{"method_name":"near_deposit","args":"eyJhIjpbMSwyLCJ4Il19","gas":"30000000000000","deposit":"123456789012345678901234567"}},{"FunctionCall":{"method_name":"ft_transfer_call","args":"e30=","gas":"300000000000000","deposit":"1"}},{"Transfer":{"deposit":"340282366920938463463374607431768211455"}}]}"#
+    );
     let near_tx: NearTransaction = serde_json::from_str(&tx_json).unwrap();
     assert_eq!(
         hex::encode(near_tx.build_for_signing()),
