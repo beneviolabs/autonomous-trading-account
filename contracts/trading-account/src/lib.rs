@@ -30,6 +30,7 @@ mod models;
 mod serializer;
 #[cfg(test)]
 mod test_support;
+#[cfg(test)]
 mod unit_tests;
 mod utils;
 
