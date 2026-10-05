@@ -26,8 +26,8 @@ Writing tests:
 What covers `request_signature`, the path that builds and signs transactions:
 - **`test_transaction_bytes_unchanged`** pins the bytes the MPC signs and the final signed transaction to what the audited version produced. If it fails after a dependency bump, the encoding or the JSON hand-off between `request_signature` and `sign_request_callback` changed. Don't update the expected values without finding out why.
 - **`create_signature_request` unit tests** pin the JSON sent to the MPC signer's `sign`, with the sha256 payload computed outside the contract.
-- **`sign_request_callback` unit tests** feed it a response in the real signer's format, signed with a fixed secp256k1 key by `test_support.rs` (success and signer failure).
-- **`test_request_signature_with_stub_signer`** runs the whole call in the sandbox with the documented minimum of 100 Tgas, using a tiny WAT contract in place of `v1.signer`.
+- **`sign_request_callback` unit tests** feed it a response in the real signer's format, signed with a fixed secp256k1 key by `test_support.rs` (success and signer failure). `test_sign_request_callback_keeps_every_deposit` checks that deposits reach the signed transaction unchanged, including ones whose digits prefix each other (1 and 10, the pen test #8 case), 0 and `u128::MAX`.
+- **`test_request_signature_with_stub_signer`** runs the whole call in the sandbox with the documented minimum of 100 Tgas, using a tiny WAT contract in place of `v1.signer`. Its two `mt_transfer` calls carry deposits 1 and 10, so it also covers the deposit case through the real JSON hand-off.
 - Only a testnet run checks the real signer.
 
 Gotchas:

@@ -4,6 +4,7 @@ use near_sdk::mock::{MockAction, Receipt};
 use near_sdk::test_utils::{VMContextBuilder, accounts, get_created_receipts};
 use near_sdk::{AccountId, Gas, NearToken, Promise, testing_env};
 use omni_transaction::TxBuilder;
+use omni_transaction::near::NearTransaction;
 use omni_transaction::near::types::Action as OmniAction;
 use omni_transaction::near::utils::PublicKeyStrExt;
 
@@ -458,7 +459,6 @@ fn test_create_signature_request_defaults_domain_id_to_zero() {
 // breaks the JSON round trip fails here.
 #[test]
 fn test_transaction_bytes_unchanged() {
-    use omni_transaction::near::NearTransaction;
     use omni_transaction::near::types::{BlockHash, Secp256K1Signature, Signature};
     use omni_transaction::{NEAR, TransactionBuilder};
 
@@ -521,11 +521,7 @@ fn test_transaction_bytes_unchanged() {
 
 // sign_request_callback with a response shaped like v1.signer's: it must parse the response,
 // rebuild the transaction from request_signature's JSON and attach the signature.
-fn callback_setup() -> (
-    TradingAccountContract,
-    omni_transaction::near::NearTransaction,
-    String,
-) {
+fn callback_setup() -> (TradingAccountContract, NearTransaction, String) {
     callback_setup_with(
         "wrap.near",
         r#"[{"type":"FunctionCall","method_name":"near_deposit","args":{},"gas":"30000000000000","deposit":"50000000000000000000000"},{"type":"Transfer","deposit":"1"}]"#,
@@ -537,11 +533,7 @@ fn callback_setup() -> (
 fn callback_setup_with(
     receiver: &str,
     actions_json: &str,
-) -> (
-    TradingAccountContract,
-    omni_transaction::near::NearTransaction,
-    String,
-) {
+) -> (TradingAccountContract, NearTransaction, String) {
     let mut context = get_context(accounts(1));
     context.current_account_id(
         "implicit_07454f3217b9229ead97798c.auth.peerfolio.near"
@@ -613,7 +605,7 @@ fn test_sign_request_callback_keeps_every_deposit() {
             .collect();
         assert_eq!(built, deposits, "built transaction");
 
-        let (response, expected_signed) = crate::test_support::mpc_sign(&tx);
+        let (response, expected_signed) = test_support::mpc_sign(&tx);
         let signed = decode_signed(contract.sign_request_callback(Ok(response), tx_json));
         assert_eq!(signed, expected_signed, "deposits {:?}", deposits);
     }

@@ -14,20 +14,19 @@ use omni_transaction::near::types::Secp256K1Signature;
 use omni_transaction::near::utils::PublicKeyStrExt;
 use omni_transaction::{
     NEAR,
+    near::NearTransaction,
     near::types::{
         Action as OmniAction, BlockHash as OmniBlockHash,
-        FunctionCallAction as OmniFunctionCallAction, Signature, U128 as OmniU128,
+        FunctionCallAction as OmniFunctionCallAction, Signature,
     },
 };
 
 pub use crate::models::*;
-pub use crate::serializer::SafeU128;
 
 mod actions;
 #[cfg(all(test, feature = "integration-tests"))]
 mod integration_tests;
 mod models;
-mod serializer;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]
@@ -166,7 +165,6 @@ impl TradingAccountContract {
                     let deposit_near = NearToken::from_yoctonear(
                         deposit.parse().map_err(|_| "Invalid deposit format")?,
                     );
-                    let safe_deposit = SafeU128(deposit_near.as_yoctonear());
                     actions::check_allowlist(contract_id, &method_name)?;
 
                     let args_bytes = serde_json::to_vec(&args)
@@ -176,17 +174,16 @@ impl TradingAccountContract {
                         method_name,
                         args: args_bytes,
                         gas,
-                        deposit: NearToken::from_yoctonear(safe_deposit.0),
+                        deposit: deposit_near,
                     })))
                 }
                 ActionString::Transfer { deposit } => {
                     let deposit_near = NearToken::from_yoctonear(
                         deposit.parse().map_err(|_| "Invalid deposit format")?,
                     );
-                    let safe_deposit = SafeU128(deposit_near.as_yoctonear());
                     Ok(OmniAction::Transfer(
                         omni_transaction::near::types::TransferAction {
-                            deposit: NearToken::from_yoctonear(safe_deposit.0),
+                            deposit: deposit_near,
                         },
                     ))
                 }
@@ -197,7 +194,7 @@ impl TradingAccountContract {
     /// Create signature request from transaction and required parameters
     fn create_signature_request(
         &self,
-        tx: &omni_transaction::near::NearTransaction,
+        tx: &NearTransaction,
         derivation_path: String,
         domain_id: Option<u32>,
     ) -> serde_json::Value {
@@ -212,19 +209,6 @@ impl TradingAccountContract {
         };
 
         serde_json::json!({ "request": sign_request })
-    }
-
-    /// Convert deposit numbers to strings in JSON
-    fn convert_deposits_to_strings(&self, tx_json_string: String, deposits: &[OmniU128]) -> String {
-        // Interestingly, I was unable to find a way to use regex for a more robust replacement of deposit
-        // numbers to strings without completely blowing up the gas cost such that all requests failed with
-        // Exceeds Prepaid Gas.
-        deposits.iter().fold(tx_json_string, |acc, deposit| {
-            acc.replace(
-                &format!("\"deposit\":{}", deposit.0),
-                &format!("\"deposit\":\"{}\"", deposit.0),
-            )
-        })
     }
 
     // Request a signature from the MPC signer
@@ -308,25 +292,9 @@ impl TradingAccountContract {
             tx.actions.len()
         ));
 
-        // Extract deposit values from omni_actions
-        let deposits: Vec<OmniU128> = omni_actions
-            .iter()
-            .map(|action| match action {
-                OmniAction::FunctionCall(call) => OmniU128(call.deposit.as_yoctonear()),
-                OmniAction::Transfer(transfer) => OmniU128(transfer.deposit.as_yoctonear()),
-                _ => OmniU128(0),
-            })
-            .collect();
-
-        near_sdk::env::log_str(&format!("Action deposits: {:?}", deposits));
-
         // Serialize transaction into a string to pass into callback
-        let mut tx_json_string = serde_json::to_string(&tx)
+        let tx_json_string = serde_json::to_string(&tx)
             .expect("Internal bug: transaction serialization should never fail");
-
-        // Convert large deposit numbers to strings for JSON compatibility
-        tx_json_string = self.convert_deposits_to_strings(tx_json_string, &deposits);
-        near_sdk::env::log_str(&format!("near tx in json: {}", tx_json_string));
 
         near_sdk::env::log_str(&format!(
             "Transaction details - Receiver: {}, Signer: {}, Actions: {:?}, Nonce: {}, BlockHash: {:?}",
@@ -425,7 +393,7 @@ impl TradingAccountContract {
         };
 
         // Deserialize transaction that we serialized in request_signature
-        let near_tx = serde_json::from_str::<models::NearTransaction>(&tx_json_string)
+        let near_tx = serde_json::from_str::<NearTransaction>(&tx_json_string)
             .expect("Internal bug: failed to deserialize our own transaction JSON");
 
         let message_hash = utils::hash_payload(&near_tx.build_for_signing());
