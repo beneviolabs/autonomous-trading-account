@@ -299,3 +299,30 @@ fn test_add_full_access_key_by_owner() {
         receipts[0].actions
     );
 }
+
+#[test]
+#[should_panic(expected = "Only the contract owner can perform this action.")]
+fn test_add_full_access_key_rejects_non_owner() {
+    let mut contract = factory();
+    call_as(&id(ATTACKER), 0);
+    let _ = contract.add_full_access_key(PUBLIC_KEY.parse().unwrap());
+}
+
+#[test]
+fn test_on_proxy_created_does_not_refund_on_success() {
+    let mut contract = factory();
+    let receipts = receipts_of(contract.on_proxy_created(
+        id(ALICE),
+        Ok(()),
+        NearToken::from_yoctonear(2_000_000),
+    ));
+
+    // The success branch returns an empty promise to the factory itself: no transfer anywhere.
+    assert!(
+        receipts
+            .iter()
+            .all(|r| r.receiver_id.as_str() == "factory.testnet" && r.actions.is_empty()),
+        "unexpected receipts: {:?}",
+        receipts
+    );
+}
