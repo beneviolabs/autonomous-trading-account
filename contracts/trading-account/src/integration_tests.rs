@@ -143,6 +143,8 @@ const STUB_SIGNER_WAT: &str = r#"(module
 
 // The full request_signature -> signer -> sign_request_callback path, with the minimum gas
 // the docs promise is enough. The real signer's signature format is only checked on testnet.
+// The deposits 1 and 10 are the pen test #8 case (ft-core#1700): the transaction JSON passed
+// to the callback must carry both unchanged.
 #[tokio::test]
 async fn test_request_signature_with_stub_signer() -> Result<()> {
     use crate::TradingAccountContract;
@@ -165,7 +167,10 @@ async fn test_request_signature_with_stub_signer() -> Result<()> {
         .await?
         .into_result()?;
 
-    let actions_json = r#"[{"type":"FunctionCall","method_name":"near_deposit","args":{},"gas":"30000000000000","deposit":"50000000000000000000000"}]"#;
+    let actions_json = r#"[
+        {"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"alice.near","token_id":"nep141:wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"},
+        {"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"bob.near","token_id":"nep141:wrap.near","amount":"2000"},"gas":"30000000000000","deposit":"10"}
+    ]"#;
     let nonce = 5;
 
     // The transaction the contract will build, signed with the test MPC key.
@@ -178,7 +183,7 @@ async fn test_request_signature_with_stub_signer() -> Result<()> {
         trading_account.id().as_str().parse()?,
         signer.id().as_str().parse()?,
     );
-    let (tx, _) = test_support::unsigned_tx(&mock, "wrap.near", actions_json, nonce, [0u8; 32]);
+    let (tx, _) = test_support::unsigned_tx(&mock, "intents.near", actions_json, nonce, [0u8; 32]);
     let (response, expected_signed) = test_support::mpc_sign(&tx);
     signer
         .call("set_response")
@@ -190,7 +195,7 @@ async fn test_request_signature_with_stub_signer() -> Result<()> {
     let outcome = agent
         .call(trading_account.id(), "request_signature")
         .args_json(json!({
-            "contract_id": "wrap.near",
+            "contract_id": "intents.near",
             "actions_json": actions_json,
             "nonce": nonce.to_string(),
             "block_hash": "11111111111111111111111111111111",

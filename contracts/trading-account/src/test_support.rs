@@ -3,9 +3,7 @@
 use crate::TradingAccountContract;
 use crate::models::EcdsaSignatureResponse;
 use omni_transaction::near::NearTransaction;
-use omni_transaction::near::types::{
-    Action, BlockHash, Secp256K1Signature, Signature, U128 as OmniU128,
-};
+use omni_transaction::near::types::{BlockHash, Secp256K1Signature, Signature};
 use omni_transaction::near::utils::PublicKeyStrExt;
 use omni_transaction::{NEAR, TransactionBuilder, TxBuilder};
 use secp256k1::{Message, Secp256k1, SecretKey};
@@ -44,28 +42,10 @@ pub fn unsigned_tx(
         .nonce(nonce)
         .receiver_id(receiver.to_string())
         .block_hash(BlockHash(block_hash))
-        .actions(omni_actions.clone())
+        .actions(omni_actions)
         .build();
-    let tx_json = callback_json(contract, &tx, &omni_actions);
+    let tx_json = serde_json::to_string(&tx).unwrap();
     (tx, tx_json)
-}
-
-/// The transaction JSON request_signature passes to sign_request_callback. Mirrors the deposit
-/// extraction in `TradingAccountContract::request_signature`; keep the two in step.
-pub fn callback_json(
-    contract: &TradingAccountContract,
-    tx: &NearTransaction,
-    actions: &[Action],
-) -> String {
-    let deposits: Vec<OmniU128> = actions
-        .iter()
-        .map(|action| match action {
-            Action::FunctionCall(call) => OmniU128(call.deposit.as_yoctonear()),
-            Action::Transfer(transfer) => OmniU128(transfer.deposit.as_yoctonear()),
-            _ => OmniU128(0),
-        })
-        .collect();
-    contract.convert_deposits_to_strings(serde_json::to_string(tx).unwrap(), &deposits)
 }
 
 /// What the MPC signer returns for `tx`, and the signed transaction the callback should build.

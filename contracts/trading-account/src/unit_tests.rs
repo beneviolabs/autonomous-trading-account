@@ -4,7 +4,7 @@ use near_sdk::mock::{MockAction, Receipt};
 use near_sdk::test_utils::{VMContextBuilder, accounts, get_created_receipts};
 use near_sdk::{AccountId, Gas, NearToken, Promise, testing_env};
 use omni_transaction::TxBuilder;
-use omni_transaction::near::types::{Action as OmniAction, U128 as OmniU128};
+use omni_transaction::near::types::Action as OmniAction;
 use omni_transaction::near::utils::PublicKeyStrExt;
 
 const PUBLIC_KEY: &str = "ed25519:11111111111111111111111111111111";
@@ -451,69 +451,14 @@ fn test_create_signature_request_defaults_domain_id_to_zero() {
     );
 }
 
-#[test]
-fn test_convert_deposits_to_strings_small_numbers() {
-    let contract = trading_account();
-    let json_input = r#"{"deposit":1000000,"other_field":"value"}"#.to_string();
-
-    let result = contract.convert_deposits_to_strings(json_input, &[OmniU128(1000000)]);
-
-    // All deposit values should be converted to strings
-    assert_eq!(result, r#"{"deposit":"1000000","other_field":"value"}"#);
-}
-
-#[test]
-fn test_convert_deposits_to_strings_large_numbers() {
-    let contract = trading_account();
-    let large_number = 10_000_000_000_000_000_000_000u128; // Larger than MAX_SAFE_INTEGER
-    let json_input = format!(r#"{{"deposit":{},"other_field":"value"}}"#, large_number);
-
-    let result = contract.convert_deposits_to_strings(json_input, &[OmniU128(large_number)]);
-
-    // Large numbers should be converted to strings (no scientific notation)
-    assert_eq!(
-        result,
-        format!(r#"{{"deposit":"{}","other_field":"value"}}"#, large_number)
-    );
-}
-
-#[test]
-fn test_convert_deposits_to_strings_multiple_deposits() {
-    let contract = trading_account();
-    let large_number1 = 10_000_000_000_000_000_000_000u128;
-    let large_number2 = 20_000_000_000_000_000_000_000u128;
-    let small_number = 1000000u128;
-
-    let json_input = format!(
-        r#"{{"actions":[{{"deposit":{}}},{{"deposit":{}}},{{"deposit":{}}}]}}"#,
-        large_number1, small_number, large_number2
-    );
-
-    let result = contract.convert_deposits_to_strings(
-        json_input,
-        &[
-            OmniU128(large_number1),
-            OmniU128(small_number),
-            OmniU128(large_number2),
-        ],
-    );
-
-    // All deposit values should be converted to strings (no scientific notation)
-    let expected = format!(
-        r#"{{"actions":[{{"deposit":"{}"}},{{"deposit":"{}"}},{{"deposit":"{}"}}]}}"#,
-        large_number1, small_number, large_number2
-    );
-    assert_eq!(result, expected);
-}
-
 // Pins the bytes that get signed and broadcast. request_signature builds the transaction with
-// omni-transaction and passes it to sign_request_callback as JSON, which rebuilds it as
-// models::NearTransaction. The expected values were produced by the audited version
+// omni-transaction and passes it to sign_request_callback as JSON, which deserializes it back
+// into the same type. The expected values were produced by the audited version
 // (omni-transaction 0.2, near-sdk 5.17), so a dependency bump that changes the encoding or
 // breaks the JSON round trip fails here.
 #[test]
 fn test_transaction_bytes_unchanged() {
-    use crate::{models, test_support};
+    use omni_transaction::near::NearTransaction;
     use omni_transaction::near::types::{BlockHash, Secp256K1Signature, Signature};
     use omni_transaction::{NEAR, TransactionBuilder};
 
@@ -548,15 +493,15 @@ fn test_transaction_bytes_unchanged() {
         .nonce(42)
         .receiver_id(contract_id.to_string())
         .block_hash(BlockHash([7u8; 32]))
-        .actions(omni_actions.clone())
+        .actions(omni_actions)
         .build();
 
     let expected_for_signing = "35000000696d706c696369745f3037343534663332313762393232396561643937373938632e617574682e70656572666f6c696f2e6e65617201903a9a9933ed92bdda3fcf30ac999060a5a0fa51c2b6c74838d3029a5aadefe038f7e4a91714f42bb5a2459a0d294be0cd047b4a999d6fd912702470f843271d2a0000000000000009000000777261702e6e656172070707070707070707070707070707070707070707070707070707070707070703000000020c0000006e6561725f6465706f7369740f0000007b2261223a5b312c322c2278225d7d00e057eb481b0000874b9f2ca8f258f1fd1e660000000000021000000066745f7472616e736665725f63616c6c020000007b7d00c06e31d91001000100000000000000000000000000000003ffffffffffffffffffffffffffffffff";
     assert_eq!(hex::encode(tx.build_for_signing()), expected_for_signing);
 
     // Same round trip as request_signature -> sign_request_callback.
-    let tx_json = test_support::callback_json(&contract, &tx, &omni_actions);
-    let near_tx: models::NearTransaction = serde_json::from_str(&tx_json).unwrap();
+    let tx_json = serde_json::to_string(&tx).unwrap();
+    let near_tx: NearTransaction = serde_json::from_str(&tx_json).unwrap();
     assert_eq!(
         hex::encode(near_tx.build_for_signing()),
         expected_for_signing
@@ -581,8 +526,22 @@ fn callback_setup() -> (
     omni_transaction::near::NearTransaction,
     String,
 ) {
-    use crate::test_support;
+    callback_setup_with(
+        "wrap.near",
+        r#"[{"type":"FunctionCall","method_name":"near_deposit","args":{},"gas":"30000000000000","deposit":"50000000000000000000000"},{"type":"Transfer","deposit":"1"}]"#,
+    )
+}
 
+/// A trading account, the transaction request_signature builds for `actions_json` sent to
+/// `receiver`, and the JSON it passes to sign_request_callback.
+fn callback_setup_with(
+    receiver: &str,
+    actions_json: &str,
+) -> (
+    TradingAccountContract,
+    omni_transaction::near::NearTransaction,
+    String,
+) {
     let mut context = get_context(accounts(1));
     context.current_account_id(
         "implicit_07454f3217b9229ead97798c.auth.peerfolio.near"
@@ -591,14 +550,17 @@ fn callback_setup() -> (
     );
     testing_env!(context.build());
     let contract = TradingAccountContract::new(accounts(1), "v1.signer".parse().unwrap());
-    let (tx, tx_json) = test_support::unsigned_tx(
-        &contract,
-        "wrap.near",
-        r#"[{"type":"FunctionCall","method_name":"near_deposit","args":{},"gas":"30000000000000","deposit":"50000000000000000000000"},{"type":"Transfer","deposit":"1"}]"#,
-        7,
-        [9u8; 32],
-    );
+    let (tx, tx_json) = test_support::unsigned_tx(&contract, receiver, actions_json, 7, [9u8; 32]);
     (contract, tx, tx_json)
+}
+
+/// Decodes sign_request_callback's base64 result.
+fn decode_signed(signed_base64: String) -> Vec<u8> {
+    near_sdk::base64::Engine::decode(
+        &near_sdk::base64::engine::general_purpose::STANDARD,
+        signed_base64,
+    )
+    .unwrap()
 }
 
 #[test]
@@ -606,14 +568,55 @@ fn test_sign_request_callback_attaches_mpc_signature() {
     let (mut contract, tx, tx_json) = callback_setup();
     let (response, expected_signed) = crate::test_support::mpc_sign(&tx);
 
-    let signed_base64 = contract.sign_request_callback(Ok(response), tx_json);
-
-    let signed = near_sdk::base64::Engine::decode(
-        &near_sdk::base64::engine::general_purpose::STANDARD,
-        signed_base64,
-    )
-    .unwrap();
+    let signed = decode_signed(contract.sign_request_callback(Ok(response), tx_json));
     assert_eq!(signed, expected_signed);
+}
+
+// Pen test finding #8 (ft-core#1700): request_signature used to rewrite each deposit in the
+// callback JSON with a plain string replace, so a deposit whose digits start another's (1 and
+// 10, 5 and 500) could corrupt the JSON or change a deposit. Every deposit must reach the
+// signed transaction exactly as requested, including 0 and u128::MAX.
+#[test]
+fn test_sign_request_callback_keeps_every_deposit() {
+    let cases: [&[u128]; 6] = [
+        &[1, 10],
+        &[10, 1],
+        &[5, 500, 50],
+        &[1, 1],
+        &[0],
+        &[u128::MAX],
+    ];
+    for deposits in cases {
+        let actions_json = serde_json::to_string(
+            &deposits
+                .iter()
+                .map(|deposit| {
+                    serde_json::json!({
+                        "type": "FunctionCall",
+                        "method_name": "mt_transfer",
+                        "args": {"receiver_id": "alice.near", "token_id": "nep141:wrap.near", "amount": "1000"},
+                        "gas": "30000000000000",
+                        "deposit": deposit.to_string(),
+                    })
+                })
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let (mut contract, tx, tx_json) = callback_setup_with("intents.near", &actions_json);
+        let built: Vec<u128> = tx
+            .actions
+            .iter()
+            .map(|action| match action {
+                OmniAction::FunctionCall(call) => call.deposit.as_yoctonear(),
+                other => panic!("unexpected action: {:?}", other),
+            })
+            .collect();
+        assert_eq!(built, deposits, "built transaction");
+
+        let (response, expected_signed) = crate::test_support::mpc_sign(&tx);
+        let signed = decode_signed(contract.sign_request_callback(Ok(response), tx_json));
+        assert_eq!(signed, expected_signed, "deposits {:?}", deposits);
+    }
 }
 
 #[test]
