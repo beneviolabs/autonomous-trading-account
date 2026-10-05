@@ -28,7 +28,7 @@ mod tests {
     }
 
     #[test]
-    fn test_factory_initialization() {
+    fn test_new_sets_owner_and_signer() {
         let account = accounts(1);
         let context = get_context(account.clone(), "factory.testnet".parse().unwrap(), None);
         testing_env!(context.build());
@@ -47,7 +47,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "Must attach at least 1000 yⓃ")]
-    fn test_insufficient_deposit() {
+    fn test_deposit_and_create_proxy_global_rejects_small_deposit() {
         let context = get_context(
             accounts(1),
             "factory.testnet".parse().unwrap(),
@@ -64,7 +64,7 @@ mod tests {
     }
 
     #[test]
-    fn test_global_code_hash() {
+    fn test_new_stores_global_code_hash() {
         let context = get_context(accounts(1), "factory.testnet".parse().unwrap(), None);
         testing_env!(context.build());
 
@@ -83,7 +83,7 @@ mod tests {
     }
 
     #[test]
-    fn test_successful_trading_account_creation() {
+    fn test_create_proxy_global_by_owner() {
         let mut contract = factory();
         testing_env!(get_context(
             ALICE.parse().unwrap(),
@@ -99,7 +99,7 @@ mod tests {
     }
 
     #[test]
-    fn test_trading_account_creation_refund() {
+    fn test_on_proxy_created_refunds_on_failure() {
         let context = get_context(accounts(1), "factory.testnet".parse().unwrap(), None);
         testing_env!(context.build());
 
@@ -139,7 +139,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "Only the contract owner can perform this action.")]
-    fn test_set_global_code_hash_unauthorized() {
+    fn test_set_global_code_hash_rejects_non_owner() {
         let context = get_context(accounts(2), "factory.testnet".parse().unwrap(), None); // Different account
         testing_env!(context.build());
 
@@ -178,7 +178,7 @@ mod tests {
     }
 
     #[test]
-    fn test_add_full_access_key() {
+    fn test_add_full_access_key_by_owner() {
         let context = get_context(accounts(1), accounts(1), None);
         testing_env!(context.build());
 
@@ -269,7 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn test_owner_id_is_bound_to_the_derived_name() {
+    fn test_create_proxy_global_binds_owner_to_derived_name() {
         let mut contract = factory();
         testing_env!(get_context(
             VICTIM.parse().unwrap(),

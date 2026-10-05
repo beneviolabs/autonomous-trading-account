@@ -6,11 +6,13 @@ mod contract_tests {
     use near_workspaces::{Account, Contract, DevNetwork, Worker, operations::Function};
     use serde_json::json;
 
-    const WASM_FILEPATH: &[u8] =
+    const TRADING_ACCOUNT_WASM: &[u8] =
         include_bytes!("../../target/near/trading_account/trading_account.wasm");
 
-    async fn init(worker: &Worker<impl DevNetwork>) -> Result<(Contract, Account)> {
-        let trading_account = worker.dev_deploy(WASM_FILEPATH).await?;
+    async fn deploy_trading_account(
+        worker: &Worker<impl DevNetwork>,
+    ) -> Result<(Contract, Account)> {
+        let trading_account = worker.dev_deploy(TRADING_ACCOUNT_WASM).await?;
         let owner = trading_account.as_account();
 
         // Initialize the contract
@@ -27,9 +29,9 @@ mod contract_tests {
     }
 
     #[tokio::test]
-    async fn trading_account_initialization() -> Result<()> {
+    async fn test_new_sets_owner() -> Result<()> {
         let worker = near_workspaces::sandbox().await?;
-        let (contract, owner) = init(&worker).await?;
+        let (contract, owner) = deploy_trading_account(&worker).await?;
 
         let contract_owner = contract
             .call("get_owner_id")
@@ -61,7 +63,7 @@ mod contract_tests {
     #[tokio::test]
     async fn test_add_authorized_user() -> Result<()> {
         let worker = near_workspaces::sandbox().await?;
-        let (contract, _owner) = init(&worker).await?;
+        let (contract, _owner) = deploy_trading_account(&worker).await?;
 
         // Create a new account to authorize
         let new_user = worker.dev_create_account().await?;
@@ -92,7 +94,7 @@ mod contract_tests {
     #[tokio::test]
     async fn test_remove_authorized_user() -> Result<()> {
         let worker = near_workspaces::sandbox().await?;
-        let (contract, _owner) = init(&worker).await?;
+        let (contract, _owner) = deploy_trading_account(&worker).await?;
 
         // Create and authorize a new user
         let user = worker.dev_create_account().await?;
@@ -128,9 +130,9 @@ mod contract_tests {
     }
 
     #[tokio::test]
-    async fn test_request_signature_unauthorized() -> Result<()> {
+    async fn test_request_signature_rejects_unauthorized_caller() -> Result<()> {
         let worker = near_workspaces::sandbox().await?;
-        let (contract, _) = init(&worker).await?;
+        let (contract, _) = deploy_trading_account(&worker).await?;
 
         // Create unauthorized user
         let unauthorized_user = worker.dev_create_account().await?;
@@ -171,7 +173,7 @@ mod contract_tests {
     #[tokio::test]
     async fn test_get_authorized_users() -> Result<()> {
         let worker = near_workspaces::sandbox().await?;
-        let (contract, _owner) = init(&worker).await?;
+        let (contract, _owner) = deploy_trading_account(&worker).await?;
 
         // Add multiple users
         let user1 = worker.dev_create_account().await?;
@@ -229,7 +231,7 @@ mod contract_tests {
 
         let worker = near_workspaces::sandbox().await?;
         let signer = worker.dev_deploy(&wat::parse_str(STUB_SIGNER_WAT)?).await?;
-        let trading_account = worker.dev_deploy(WASM_FILEPATH).await?;
+        let trading_account = worker.dev_deploy(TRADING_ACCOUNT_WASM).await?;
         trading_account
             .call("new")
             .args_json(json!({ "owner_id": trading_account.id(), "signer_id": signer.id() }))

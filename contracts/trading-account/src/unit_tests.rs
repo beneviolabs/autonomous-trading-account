@@ -24,7 +24,7 @@ mod tests {
     }
 
     #[test]
-    fn test_new() {
+    fn test_new_sets_owner() {
         let context = get_context(accounts(1));
         testing_env!(context.build());
         let contract = TradingAccountContract::new(
@@ -35,7 +35,7 @@ mod tests {
     }
 
     #[test]
-    fn test_authorize_user() {
+    fn test_add_authorized_user() {
         let context = get_context(accounts(1));
         testing_env!(context.build());
         let mut contract = TradingAccountContract::new(
@@ -65,7 +65,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "You have no power here. Only the owner can perform this action.")]
-    fn test_unauthorized_add_user() {
+    fn test_add_authorized_user_rejects_non_owner() {
         let context = get_context(accounts(2));
         testing_env!(context.build());
         let mut contract = TradingAccountContract::new(
@@ -95,7 +95,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "Maximum number of authorized users reached:(10)")]
-    fn test_max_authorized_users_limit() {
+    fn test_add_authorized_user_rejects_more_than_max() {
         let context = get_context(accounts(1));
         testing_env!(context.build());
         let mut contract = TradingAccountContract::new(
@@ -115,7 +115,7 @@ mod tests {
     }
 
     #[test]
-    fn test_max_authorized_users_remove_and_add() {
+    fn test_remove_authorized_user_frees_a_slot() {
         let context = get_context(accounts(1));
         testing_env!(context.build());
         let mut contract = TradingAccountContract::new(
@@ -146,7 +146,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "Unauthorized: only authorized users can request signatures")]
-    fn test_unauthorized_request_signature() {
+    fn test_request_signature_rejects_unauthorized_caller() {
         let context = get_context(accounts(2));
         testing_env!(context.build());
         let mut contract = TradingAccountContract::new(
@@ -168,7 +168,7 @@ mod tests {
     #[should_panic(
         expected = "unknown variant `Sign Message`, expected `FunctionCall` or `Transfer`"
     )]
-    fn test_disallowed_action() {
+    fn test_request_signature_rejects_unknown_action_type() {
         let context = get_context(accounts(2));
         testing_env!(context.build());
         let mut contract = TradingAccountContract::new(
@@ -202,7 +202,7 @@ mod tests {
     #[should_panic(
         expected = "Transfer actions must be accompanied by at least one FunctionCall action"
     )]
-    fn test_request_signature_single_transfer_action_fails() {
+    fn test_request_signature_rejects_lone_transfer() {
         let context = get_context(accounts(2));
         testing_env!(context.build());
         let mut contract = TradingAccountContract::new(
@@ -234,7 +234,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "GasExceeded")]
-    fn test_request_signature_multiple_actions_with_transfer_succeeds() {
+    fn test_request_signature_accepts_transfer_with_function_call() {
         let context = get_context(accounts(2));
         testing_env!(context.build());
         let mut contract = TradingAccountContract::new(
@@ -276,7 +276,7 @@ mod tests {
     #[should_panic(
         expected = "Transfer actions must be accompanied by at least one FunctionCall action"
     )]
-    fn test_request_signature_multiple_transfer_actions_without_function_call_fails() {
+    fn test_request_signature_rejects_transfers_without_function_call() {
         let context = get_context(accounts(2));
         testing_env!(context.build());
         let mut contract = TradingAccountContract::new(
@@ -334,7 +334,7 @@ mod tests {
     }
 
     #[test]
-    fn test_add_full_access_key_owner() {
+    fn test_add_full_access_key_by_owner() {
         let context = get_context(accounts(1));
         testing_env!(context.build());
         let mut contract = TradingAccountContract::new(
@@ -349,7 +349,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "You have no power here. Only the owner can perform this action.")]
-    fn test_add_full_access_key_non_owner() {
+    fn test_add_full_access_key_rejects_non_owner() {
         let context = get_context(accounts(2));
         testing_env!(context.build());
         let mut contract = TradingAccountContract::new(
@@ -361,7 +361,7 @@ mod tests {
     }
 
     #[test]
-    fn test_add_full_access_key_and_register_with_intents_owner() {
+    fn test_add_full_access_key_and_register_with_intents_by_owner() {
         let mut context = get_context(accounts(1));
         context.attached_deposit(near_sdk::NearToken::from_yoctonear(1));
         testing_env!(context.build());
@@ -376,7 +376,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "You have no power here. Only the owner can perform this action.")]
-    fn test_add_full_access_key_and_register_with_intents_non_owner() {
+    fn test_add_full_access_key_and_register_with_intents_rejects_non_owner() {
         let mut context = get_context(accounts(2));
         context.attached_deposit(near_sdk::NearToken::from_yoctonear(1));
         testing_env!(context.build());
@@ -389,7 +389,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_and_build_actions_valid_function_call() {
+    fn test_validate_and_build_actions_accepts_function_call() {
         let context = get_context(accounts(1));
         testing_env!(context.build());
         let contract = TradingAccountContract::new(
@@ -413,7 +413,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_and_build_actions_valid_transfer() {
+    fn test_validate_and_build_actions_accepts_transfer_with_function_call() {
         let context = get_context(accounts(1));
         testing_env!(context.build());
         let contract = TradingAccountContract::new(
@@ -442,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_and_build_actions_disallowed_contract() {
+    fn test_validate_and_build_actions_rejects_contract_outside_allowlist() {
         let context = get_context(accounts(1));
         testing_env!(context.build());
         let contract = TradingAccountContract::new(
@@ -466,7 +466,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_and_build_actions_disallowed_method() {
+    fn test_validate_and_build_actions_rejects_method_outside_allowlist() {
         let context = get_context(accounts(1));
         testing_env!(context.build());
         let contract = TradingAccountContract::new(
@@ -490,7 +490,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_and_build_actions_invalid_gas_format() {
+    fn test_validate_and_build_actions_rejects_invalid_gas() {
         let context = get_context(accounts(1));
         testing_env!(context.build());
         let contract = TradingAccountContract::new(
@@ -514,7 +514,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_and_build_actions_invalid_deposit_format() {
+    fn test_validate_and_build_actions_rejects_invalid_deposit() {
         let context = get_context(accounts(1));
         testing_env!(context.build());
         let contract = TradingAccountContract::new(
@@ -538,7 +538,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_and_build_actions_multiple_actions() {
+    fn test_validate_and_build_actions_accepts_multiple_actions() {
         let context = get_context(accounts(1));
         testing_env!(context.build());
         let contract = TradingAccountContract::new(
@@ -573,7 +573,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_and_build_actions_empty_actions() {
+    fn test_validate_and_build_actions_rejects_empty_actions() {
         let context = get_context(accounts(1));
         testing_env!(context.build());
         let contract = TradingAccountContract::new(
@@ -592,7 +592,7 @@ mod tests {
     }
 
     #[test]
-    fn test_create_signature_request_with_domain_id() {
+    fn test_create_signature_request_passes_domain_id() {
         let context = get_context(accounts(1));
         testing_env!(context.build());
         let contract = TradingAccountContract::new(
@@ -638,7 +638,7 @@ mod tests {
     }
 
     #[test]
-    fn test_create_signature_request_without_domain_id() {
+    fn test_create_signature_request_defaults_domain_id_to_zero() {
         let context = get_context(accounts(1));
         testing_env!(context.build());
         let contract = TradingAccountContract::new(
@@ -760,7 +760,7 @@ mod tests {
     }
 
     #[test]
-    fn test_set_signer_id_owner() {
+    fn test_set_signer_id_by_owner() {
         let context = get_context(accounts(1));
         testing_env!(context.build());
         let mut contract = TradingAccountContract::new(
@@ -775,7 +775,7 @@ mod tests {
     }
 
     #[test]
-    fn test_set_signer_id_authorized_user() {
+    fn test_set_signer_id_by_authorized_user() {
         let context = get_context(accounts(1));
         testing_env!(context.build());
         let mut contract = TradingAccountContract::new(
@@ -798,7 +798,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "Unauthorized: only authorized users can set signer ID")]
-    fn test_set_signer_id_unauthorized() {
+    fn test_set_signer_id_rejects_unauthorized_caller() {
         let context = get_context(accounts(1));
         testing_env!(context.build());
         let mut contract = TradingAccountContract::new(
@@ -926,7 +926,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "Failed to parse the MPC's Signature response")]
-    fn test_sign_request_callback_signer_failure() {
+    fn test_sign_request_callback_rejects_signer_failure() {
         let (mut contract, _, tx_json) = callback_setup();
         contract.sign_request_callback(Err(near_sdk::PromiseError::Failed), tx_json);
     }
