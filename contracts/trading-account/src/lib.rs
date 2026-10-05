@@ -1,6 +1,5 @@
 #![allow(clippy::too_many_arguments)]
 
-use actions::NearAction;
 use near_gas::NearGas;
 use near_sdk::base64;
 use near_sdk::collections::UnorderedSet;
@@ -27,7 +26,6 @@ use omni_transaction::{
 use once_cell::sync::Lazy;
 static NEAR_INTENTS_ADDRESS: Lazy<AccountId> = Lazy::new(|| "intents.near".parse().unwrap());
 
-use crate::actions::ActionValidationError;
 pub use crate::models::*;
 pub use crate::serializer::SafeU128;
 
@@ -182,17 +180,7 @@ impl TradingAccountContract {
                         deposit.parse().map_err(|_| "Invalid deposit format")?,
                     );
                     let safe_deposit = SafeU128(deposit_near.as_yoctonear());
-                    // Verify action is allowed
-                    let near_action = NearAction {
-                        method_name: Some(method_name.clone()),
-                        contract_id: contract_id.clone(),
-                        gas_attached: NearGas::from_gas(gas_u64.0),
-                        deposit_attached: deposit_near,
-                    };
-                    near_action.is_allowed().map_err(|e| match e {
-                        ActionValidationError::ContractNotAllowed(msg) => msg,
-                        ActionValidationError::MethodNotAllowed(msg) => msg,
-                    })?;
+                    actions::check_allowlist(contract_id, &method_name)?;
 
                     // Convert args to bytes
                     let args_bytes = serde_json::to_vec(&args)
