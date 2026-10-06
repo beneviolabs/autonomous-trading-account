@@ -11,6 +11,7 @@ The per-user contract, created by the [factory](factory.md) at `implicit_<24hex>
 - **Arguments aren't checked.** Every allowed method is allowed on every allowed contract. An authorized user can call `ft_withdraw` or `mt_transfer` on `intents.near` with any recipient. Only authorize accounts you trust with the trading account's funds.
 - An authorized user can also change the MPC signer contract with `set_signer_id`.
 - **The owner isn't an authorized user** unless it adds itself, so it can't call `request_signature` by default.
+- **To cut off an agent at once**, remove it with `remove_authorized_user` and delete the MPC key with `delete_key`. Removing the agent alone leaves transactions it already had signed valid until they expire, about 24 hours later. Deleting the key also stops all signing until the owner adds it back with `add_full_access_key`. Adding it back doesn't revive transactions signed before the deletion, because the re-added key starts at a higher nonce.
 - **The trading account never broadcasts anything.** It returns a signed transaction, and the caller broadcasts it. The transaction runs from the trading account, so gas and attached deposits come out of its balance.
 - The allowlist is compiled in. Changing it means [releasing new trading account code](releases.md#release-trading-account-code), and existing trading accounts keep their old code.
 

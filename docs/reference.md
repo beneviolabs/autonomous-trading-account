@@ -27,6 +27,7 @@ The public methods of both contracts, with who may call them and what isn't obvi
 | `set_signer_id(signer_id)` | owner or any authorized user | Changes the MPC signer contract. |
 | `request_signature(...)` *payable* | authorized users | See below. |
 | `add_full_access_key(public_key)` | owner | Registers the MPC key, or the owner's own key before deleting the account. |
+| `delete_key(public_key)` *payable, exactly 1 yocto* | owner | Deletes an access key from the trading account. Deleting the MPC key invalidates every transaction it signed that hasn't been broadcast yet. |
 | `add_full_access_key_and_register_with_intents(public_key)` *payable, exactly 1 yocto* | owner | Also registers the key on `intents.near`. That call fails on testnet, but the key is still added. |
 
 ### `request_signature`

@@ -348,6 +348,16 @@ impl TradingAccountContract {
         Promise::new(env::current_account_id()).add_full_access_key(public_key)
     }
 
+    /// Deletes `public_key` from the trading account. Deleting the MPC key invalidates every
+    /// transaction it already signed that hasn't been broadcast. Owner only, with exactly 1 yoctoNEAR
+    /// attached so the owner must sign with a full-access key.
+    #[payable]
+    pub fn delete_key(&mut self, public_key: PublicKey) -> Promise {
+        self.assert_owner();
+        near_sdk::assert_one_yocto();
+        Promise::new(env::current_account_id()).delete_key(public_key)
+    }
+
     #[payable]
     pub fn add_full_access_key_and_register_with_intents(
         &mut self,
