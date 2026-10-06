@@ -249,6 +249,66 @@ fn test_add_full_access_key_and_register_with_intents_rejects_non_owner() {
     let _ = contract.add_full_access_key_and_register_with_intents(PUBLIC_KEY.parse().unwrap());
 }
 
+/// Calls delete_key as `caller`, attaching `deposit` yoctoNEAR.
+fn delete_key_as(
+    contract: &mut TradingAccountContract,
+    caller: AccountId,
+    deposit: u128,
+) -> Promise {
+    let mut context = get_context(caller);
+    context.attached_deposit(NearToken::from_yoctonear(deposit));
+    testing_env!(context.build());
+    contract.delete_key(PUBLIC_KEY.parse().unwrap())
+}
+
+#[test]
+fn test_delete_key_by_owner() {
+    let mut contract = trading_account();
+    let receipts = receipts_of(delete_key_as(&mut contract, owner(), 1));
+
+    assert_eq!(receipts.len(), 1);
+    assert_eq!(receipts[0].receiver_id, near_sdk::env::current_account_id());
+    assert!(
+        matches!(
+            &receipts[0].actions[..],
+            [MockAction::DeleteKey { public_key, .. }] if public_key.to_string() == PUBLIC_KEY
+        ),
+        "unexpected actions: {:?}",
+        receipts[0].actions
+    );
+}
+
+// Deleting the MPC key is the only way to invalidate transactions the bot already had signed
+// (pen test findings #5 and #6, ft-core#1791), and only the owner may do it.
+#[test]
+#[should_panic(expected = "You have no power here. Only the owner can perform this action.")]
+fn test_delete_key_rejects_authorized_user() {
+    let mut contract = trading_account_with_agent();
+    let _ = delete_key_as(&mut contract, agent(), 1);
+}
+
+#[test]
+#[should_panic(expected = "You have no power here. Only the owner can perform this action.")]
+fn test_delete_key_rejects_unauthorized_caller() {
+    let mut contract = trading_account();
+    let _ = delete_key_as(&mut contract, stranger(), 1);
+}
+
+// Exactly 1 yoctoNEAR means the call must be signed with a full-access key, not a function-call key.
+#[test]
+#[should_panic(expected = "Requires attached deposit of exactly 1 yoctoNEAR")]
+fn test_delete_key_rejects_no_deposit() {
+    let mut contract = trading_account();
+    let _ = delete_key_as(&mut contract, owner(), 0);
+}
+
+#[test]
+#[should_panic(expected = "Requires attached deposit of exactly 1 yoctoNEAR")]
+fn test_delete_key_rejects_more_than_one_yocto() {
+    let mut contract = trading_account();
+    let _ = delete_key_as(&mut contract, owner(), 2);
+}
+
 #[test]
 #[should_panic(expected = "Unauthorized: only authorized users can request signatures")]
 fn test_request_signature_rejects_unauthorized_caller() {
