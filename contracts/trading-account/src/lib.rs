@@ -17,7 +17,8 @@ use omni_transaction::{
     near::NearTransaction,
     near::types::{
         Action as OmniAction, BlockHash as OmniBlockHash,
-        FunctionCallAction as OmniFunctionCallAction, Signature,
+        FunctionCallAction as OmniFunctionCallAction, PublicKey as OmniPublicKey,
+        Secp256K1PublicKey, Signature,
     },
 };
 
@@ -108,10 +109,7 @@ impl TradingAccountContract {
     }
 
     pub fn set_signer_id(&mut self, signer_id: AccountId) {
-        assert!(
-            self.is_authorized(env::predecessor_account_id()),
-            "Unauthorized: only authorized users can set signer ID"
-        );
+        self.assert_owner();
         self.signer_id = signer_id;
     }
 
@@ -394,19 +392,23 @@ impl TradingAccountContract {
             signature.extend_from_slice(&r);
             signature.extend_from_slice(&s);
 
-            // Verify signature
-            let recovered = self.test_recover(message_hash.to_vec(), signature, v);
-            match recovered {
-                Some(public_key) => {
+            // Verify signature: it must recover to the key the transaction is signed for
+            let Some(recovered_key) = self.recover_key(message_hash.to_vec(), signature, v) else {
+                near_sdk::env::log_str("Signature verification failed!");
+                near_sdk::env::panic_str("Invalid signature: ecrecover failed");
+            };
+            match &near_tx.signer_public_key {
+                OmniPublicKey::SECP256K1(Secp256K1PublicKey(tx_key))
+                    if *tx_key == recovered_key =>
+                {
                     near_sdk::env::log_str(&format!(
                         "Signature verified! Recovered public key: {}",
-                        public_key
+                        near_tx.signer_public_key
                     ));
                 }
-                None => {
-                    near_sdk::env::log_str("Signature verification failed!");
-                    near_sdk::env::panic_str("Invalid signature: ecrecover failed");
-                }
+                _ => near_sdk::env::panic_str(
+                    "Invalid signature: recovered key doesn't match the transaction's public key",
+                ),
             }
 
             // Add individual bytes together in the correct order
@@ -431,22 +433,13 @@ impl TradingAccountContract {
         base64_tx
     }
 
-    fn test_recover(&self, hash: Vec<u8>, signature: Vec<u8>, v: u8) -> Option<String> {
+    fn recover_key(&self, hash: Vec<u8>, signature: Vec<u8>, v: u8) -> Option<[u8; 64]> {
         let recovered: Option<[u8; 64]> = env::ecrecover(&hash, &signature, v, true);
 
         env::log_str(&format!("Hash: {}", hex::encode(&hash)));
         env::log_str(&format!("Signature: {}", hex::encode(&signature)));
         env::log_str(&format!("V: {}", v));
 
-        recovered.map(|key: [u8; 64]| {
-            // Add prefix byte for secp256k1 (0x01)
-            let mut prefixed_key = vec![0x01];
-            prefixed_key.extend_from_slice(&key);
-
-            let key = format!("secp256k1:{}", bs58::encode(&prefixed_key).into_string());
-
-            env::log_str(&format!("Recovered key: {}", key));
-            key
-        })
+        recovered
     }
 }
