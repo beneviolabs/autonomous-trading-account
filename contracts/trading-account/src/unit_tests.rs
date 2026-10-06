@@ -160,16 +160,18 @@ fn test_set_signer_id_by_owner() {
     assert_eq!(contract.get_signer_id().as_str(), "new-signer.near");
 }
 
+// The signer decides what gets signed, so only the owner can change it. A bot that could repoint
+// it could have anything signed (pen test finding #7, ft-core#1696).
 #[test]
-fn test_set_signer_id_by_authorized_user() {
+#[should_panic(expected = "You have no power here. Only the owner can perform this action.")]
+fn test_set_signer_id_rejects_authorized_user() {
     let mut contract = trading_account_with_agent();
     call_as(agent());
     contract.set_signer_id("new-signer.near".parse().unwrap());
-    assert_eq!(contract.get_signer_id().as_str(), "new-signer.near");
 }
 
 #[test]
-#[should_panic(expected = "Unauthorized: only authorized users can set signer ID")]
+#[should_panic(expected = "You have no power here. Only the owner can perform this action.")]
 fn test_set_signer_id_rejects_unauthorized_caller() {
     let mut contract = trading_account();
     call_as(stranger());
@@ -317,6 +319,20 @@ fn test_delete_key_rejects_more_than_one_yocto() {
 fn test_request_signature_rejects_unauthorized_caller() {
     let mut contract = trading_account();
     let _ = request_signature(&mut contract, stranger(), "intents.near", MT_TRANSFER);
+}
+
+// Only authorized users (the bot) can request signatures, not the owner. That's deliberate: the
+// owner has no use for signing through the trading account, so it doesn't get the capability.
+#[test]
+#[should_panic(expected = "Unauthorized: only authorized users can request signatures")]
+fn test_request_signature_rejects_owner() {
+    let mut contract = trading_account_with_agent();
+    let _ = request_signature(
+        &mut contract,
+        owner(),
+        "intents.near",
+        r#"[{"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"alice.near","token_id":"nep141:wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"}]"#,
+    );
 }
 
 #[test]
@@ -679,6 +695,69 @@ fn test_sign_request_callback_attaches_mpc_signature() {
 
     let signed = decode_signed(contract.sign_request_callback(Ok(response), tx_json));
     assert_eq!(signed, expected_signed);
+}
+
+/// A secp256k1 secret key other than the test MPC key.
+const OTHER_SECRET_KEY: [u8; 32] = [0x43; 32];
+
+// The callback only returns a transaction whose signature recovers to the transaction's own public
+// key, over that transaction's hash (pen test finding #7, ft-core#1696). Anything else would be
+// rejected at broadcast at best, so it's rejected here.
+#[test]
+#[should_panic(
+    expected = "Invalid signature: recovered key doesn't match the transaction's public key"
+)]
+fn test_sign_request_callback_rejects_signature_from_another_key() {
+    let (mut contract, tx, tx_json) = callback_setup();
+    let (response, _) = test_support::mpc_sign_with(&tx, OTHER_SECRET_KEY);
+    contract.sign_request_callback(Ok(response), tx_json);
+}
+
+#[test]
+#[should_panic(
+    expected = "Invalid signature: recovered key doesn't match the transaction's public key"
+)]
+fn test_sign_request_callback_rejects_signature_over_another_transaction() {
+    let (mut contract, tx, tx_json) = callback_setup();
+    let mut other_tx = tx.clone();
+    other_tx.nonce = omni_transaction::near::types::U64(tx.nonce.0 + 1);
+    let (response, _) = test_support::mpc_sign(&other_tx);
+    contract.sign_request_callback(Ok(response), tx_json);
+}
+
+#[test]
+#[should_panic(
+    expected = "Invalid signature: recovered key doesn't match the transaction's public key"
+)]
+fn test_sign_request_callback_rejects_flipped_recovery_id() {
+    let (mut contract, tx, tx_json) = callback_setup();
+    let (mut response, _) = test_support::mpc_sign(&tx);
+    response.recovery_id ^= 1;
+    contract.sign_request_callback(Ok(response), tx_json);
+}
+
+// request_signature accepts an ed25519 `mpc_signer_pk`, but the MPC signs with secp256k1, so such a
+// transaction can never carry a valid signature. Signed with the test MPC key, recovery succeeds,
+// and only the key check rejects it.
+#[test]
+#[should_panic(
+    expected = "Invalid signature: recovered key doesn't match the transaction's public key"
+)]
+fn test_sign_request_callback_rejects_ed25519_transaction_key() {
+    let (mut contract, mut tx, _) = callback_setup();
+    tx.signer_public_key = PUBLIC_KEY.to_public_key().unwrap();
+    let tx_json = serde_json::to_string(&tx).unwrap();
+    let (response, _) = test_support::mpc_sign(&tx);
+    contract.sign_request_callback(Ok(response), tx_json);
+}
+
+#[test]
+#[should_panic(expected = "Invalid hex in r")]
+fn test_sign_request_callback_rejects_malformed_big_r() {
+    let (mut contract, tx, tx_json) = callback_setup();
+    let (mut response, _) = test_support::mpc_sign(&tx);
+    response.big_r.affine_point = "02not hex".to_string();
+    contract.sign_request_callback(Ok(response), tx_json);
 }
 
 // Pen test finding #8 (ft-core#1700): request_signature used to rewrite each deposit in the
