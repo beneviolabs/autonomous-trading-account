@@ -5,10 +5,8 @@ The per-user contract, created by the [factory](factory.md) at `implicit_<24hex>
 ## Security model
 
 - The MPC key is derived from the trading account and a derivation path, so only the trading account contract can get signatures for it. The key has full access to the trading account.
-- The contract signs only transactions to allowlisted contracts and methods, defined in [`actions.rs`](../contracts/trading-account/src/actions.rs):
-  - contracts: `wrap.near`, `intents.near`, `wrap.testnet`
-  - methods: `add_public_key`, `ft_transfer_call`, `near_deposit`, `mt_transfer_call`, `mt_transfer`, `ft_withdraw`
-- **Arguments aren't checked.** Every allowed method is allowed on every allowed contract. An authorized user can call `ft_withdraw` or `mt_transfer` on `intents.near` with any recipient. Only authorize accounts you trust with the trading account's funds.
+- The contract signs only one call: `mt_transfer` on `intents.near`, the allowlist in [`actions.rs`](../contracts/trading-account/src/actions.rs). Every other contract and method is rejected, and so are bare NEAR transfers.
+- **Arguments aren't checked.** An authorized user can `mt_transfer` any token the trading account holds on `intents.near` to any recipient. Only authorize accounts you trust with the trading account's funds.
 - An authorized user can also change the MPC signer contract with `set_signer_id`.
 - **The owner isn't an authorized user** unless it adds itself, so it can't call `request_signature` by default.
 - **The trading account never broadcasts anything.** It returns a signed transaction, and the caller broadcasts it. The transaction runs from the trading account, so gas and attached deposits come out of its balance.
@@ -67,9 +65,9 @@ These commands use testnet and near-cli-rs (tested with 0.22). Variables:
       ```bash
       curl -s https://rpc.testnet.near.org -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"block","params":{"finality":"final"}}' | jq -r .result.header.hash
       ```
-   2. Request the signature. This one wraps 0.05 NEAR; the first wrap keeps 0.00125 of it for `wrap.testnet` storage, so 0.04875 wNEAR arrives. `actions_json` is a JSON *string*, and `nonce` is the current nonce + 1.
+   2. Request the signature. This one moves wNEAR the trading account holds on `intents.near` to the owner (`amount` is in wNEAR's smallest unit). `intents.near` only exists on mainnet, so on testnet the transaction is signed but fails when broadcast. `actions_json` is a JSON *string*, and `nonce` is the current nonce + 1.
       ```bash
-      near contract call-function as-transaction $TA request_signature json-args "{\"contract_id\":\"wrap.testnet\",\"actions_json\":\"[{\\\"type\\\":\\\"FunctionCall\\\",\\\"method_name\\\":\\\"near_deposit\\\",\\\"args\\\":{},\\\"gas\\\":\\\"30000000000000\\\",\\\"deposit\\\":\\\"50000000000000000000000\\\"}]\",\"nonce\":\"<nonce + 1>\",\"block_hash\":\"<block hash>\",\"mpc_signer_pk\":\"<MPC key>\",\"derivation_path\":\"$TA\"}" prepaid-gas '300.0 Tgas' attached-deposit '1 yoctoNEAR' sign-as $AGENT network-config testnet sign-with-keychain send
+      near contract call-function as-transaction $TA request_signature json-args "{\"contract_id\":\"intents.near\",\"actions_json\":\"[{\\\"type\\\":\\\"FunctionCall\\\",\\\"method_name\\\":\\\"mt_transfer\\\",\\\"args\\\":{\\\"receiver_id\\\":\\\"$OWNER\\\",\\\"token_id\\\":\\\"nep141:wrap.near\\\",\\\"amount\\\":\\\"1000\\\"},\\\"gas\\\":\\\"30000000000000\\\",\\\"deposit\\\":\\\"1\\\"}]\",\"nonce\":\"<nonce + 1>\",\"block_hash\":\"<block hash>\",\"mpc_signer_pk\":\"<MPC key>\",\"derivation_path\":\"$TA\"}" prepaid-gas '300.0 Tgas' attached-deposit '1 yoctoNEAR' sign-as $AGENT network-config testnet sign-with-keychain send
       ```
    3. Broadcast the base64 value it returns:
       ```bash

@@ -57,9 +57,6 @@ pub enum ActionString {
         gas: String,
         deposit: String,
     },
-    Transfer {
-        deposit: String,
-    },
 }
 
 #[near]
@@ -137,21 +134,6 @@ impl TradingAccountContract {
             return Err("Actions cannot be empty. At least one action is required.".to_string());
         }
 
-        // Ensure Transfer actions are accompanied by at least one FunctionCall action
-        let has_transfer = actions
-            .iter()
-            .any(|action| matches!(action, ActionString::Transfer { .. }));
-        let has_function_call = actions
-            .iter()
-            .any(|action| matches!(action, ActionString::FunctionCall { .. }));
-
-        if has_transfer && !has_function_call {
-            return Err(
-                "Transfer actions must be accompanied by at least one FunctionCall action"
-                    .to_string(),
-            );
-        }
-
         actions
             .into_iter()
             .map(|action| match action {
@@ -176,16 +158,6 @@ impl TradingAccountContract {
                         gas,
                         deposit: deposit_near,
                     })))
-                }
-                ActionString::Transfer { deposit } => {
-                    let deposit_near = NearToken::from_yoctonear(
-                        deposit.parse().map_err(|_| "Invalid deposit format")?,
-                    );
-                    Ok(OmniAction::Transfer(
-                        omni_transaction::near::types::TransferAction {
-                            deposit: deposit_near,
-                        },
-                    ))
                 }
             })
             .collect()
