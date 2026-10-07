@@ -26,6 +26,8 @@ The public methods of both contracts, with who may call them and what isn't obvi
 | `get_agents`, `get_owner_id`, `get_signer_id` | view | |
 | `contract_version` | view | `{"contract_version": "1.0.0", "state_version": 1}`: the versions compiled into the running code. |
 | `migrate` | the account itself (*private*) | Brings older stored state up to the current state version. Runs after a code swap. Logs a `migrated` event with the pre-migration state and agents. |
+| `upgrade(expected_hash)` *payable, exactly 1 yocto* | owner | Upgrades to the code hash the factory (the account's parent) points at. Fails unless the factory's hash equals `expected_hash`. Attach 100 Tgas. |
+| `do_upgrade(expected_hash)` | the account itself (*private*) | `upgrade`'s callback: switches to the global contract and runs `migrate` in one receipt. |
 | `set_signer_id(signer_id)` | owner | Changes the MPC signer contract. |
 | `request_signature(...)` *payable* | agents | See below. |
 | `add_full_access_key(public_key)` | owner | Registers the MPC key, or the owner's own key before deleting the account. |
