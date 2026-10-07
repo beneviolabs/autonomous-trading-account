@@ -44,3 +44,6 @@ anyhow = "1.0"
 secp256k1 = { version = "0.27", features = ["recovery"] }
 # Compiles the stub MPC signer in integration_tests.rs.
 wat = "1"
+# Broadcasts signed transactions to the sandbox in integration_tests.rs. The version
+# near-workspaces already uses; no TLS needed for the local RPC.
+reqwest = { version = "0.12", default-features = false }

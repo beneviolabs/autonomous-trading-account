@@ -1,7 +1,8 @@
 use crate::test_support;
 use anyhow::Result;
-use near_workspaces::types::Gas;
-use near_workspaces::{AccountId, Contract, DevNetwork, Worker, operations::Function};
+use near_workspaces::network::Sandbox;
+use near_workspaces::types::{Gas, NearToken};
+use near_workspaces::{Account, AccountId, Contract, DevNetwork, Worker, operations::Function};
 use serde_json::json;
 
 const TRADING_ACCOUNT_WASM: &[u8] =
@@ -141,16 +142,12 @@ const STUB_SIGNER_WAT: &str = r#"(module
     (call $read_register (i64.const 0) (i64.const 1024))
     (call $value_return (call $register_len (i64.const 0)) (i64.const 1024))))"#;
 
-// The full request_signature -> signer -> sign_request_callback path, with the minimum gas
-// the docs promise is enough. The real signer's signature format is only checked on testnet.
-// The deposits 1 and 10 are the pen test #8 case (ft-core#1700): the transaction JSON passed
-// to the callback must carry both unchanged.
-#[tokio::test]
-async fn test_request_signature_with_stub_signer() -> Result<()> {
-    use crate::TradingAccountContract;
-    use near_sdk::{test_utils::VMContextBuilder, testing_env};
-
-    let worker = near_workspaces::sandbox().await?;
+/// A trading account whose MPC signer is the stub, owned by itself (so `trading_account.call(...)`
+/// calls as the owner), with an authorized agent. Returns the trading account, the stub signer and
+/// the agent.
+async fn deploy_with_stub_signer(
+    worker: &Worker<impl DevNetwork>,
+) -> Result<(Contract, Contract, Account)> {
     let signer = worker.dev_deploy(&wat::parse_str(STUB_SIGNER_WAT)?).await?;
     let trading_account = worker.dev_deploy(TRADING_ACCOUNT_WASM).await?;
     trading_account
@@ -166,12 +163,23 @@ async fn test_request_signature_with_stub_signer() -> Result<()> {
         .transact()
         .await?
         .into_result()?;
+    Ok((trading_account, signer, agent))
+}
 
-    let actions_json = r#"[
-        {"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"alice.near","token_id":"nep141:wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"},
-        {"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"bob.near","token_id":"nep141:wrap.near","amount":"2000"},"gas":"30000000000000","deposit":"10"}
-    ]"#;
-    let nonce = 5;
+/// Has `agent` request a signature for `actions_json` sent to intents.near, with the stub primed
+/// to return the test MPC key's signature over the transaction the contract will build. Attaches
+/// the documented minimum of 100 Tgas. Returns the base64 signed transaction and the bytes it
+/// should decode to.
+async fn request_signature_with_stub(
+    trading_account: &Contract,
+    signer: &Contract,
+    agent: &Account,
+    actions_json: &str,
+    nonce: u64,
+    block_hash: [u8; 32],
+) -> Result<(String, Vec<u8>)> {
+    use crate::TradingAccountContract;
+    use near_sdk::{json_types::Base58CryptoHash, test_utils::VMContextBuilder, testing_env};
 
     // The transaction the contract will build, signed with the test MPC key.
     testing_env!(
@@ -183,7 +191,7 @@ async fn test_request_signature_with_stub_signer() -> Result<()> {
         trading_account.id().as_str().parse()?,
         signer.id().as_str().parse()?,
     );
-    let (tx, _) = test_support::unsigned_tx(&mock, "intents.near", actions_json, nonce, [0u8; 32]);
+    let (tx, _) = test_support::unsigned_tx(&mock, "intents.near", actions_json, nonce, block_hash);
     let (response, expected_signed) = test_support::mpc_sign(&tx);
     signer
         .call("set_response")
@@ -198,20 +206,142 @@ async fn test_request_signature_with_stub_signer() -> Result<()> {
             "contract_id": "intents.near",
             "actions_json": actions_json,
             "nonce": nonce.to_string(),
-            "block_hash": "11111111111111111111111111111111",
+            "block_hash": Base58CryptoHash::from(block_hash),
             "mpc_signer_pk": test_support::mpc_public_key(),
             "derivation_path": trading_account.id(),
         }))
-        .deposit(near_workspaces::types::NearToken::from_yoctonear(1))
+        .deposit(NearToken::from_yoctonear(1))
         .gas(Gas::from_tgas(100))
         .transact()
         .await?;
     assert!(outcome.is_success(), "{:#?}", outcome.failures());
+    Ok((outcome.json()?, expected_signed))
+}
+
+// The full request_signature -> signer -> sign_request_callback path, with the minimum gas
+// the docs promise is enough. The real signer's signature format is only checked on testnet.
+// The deposits 1 and 10 are the pen test #8 case (ft-core#1700): the transaction JSON passed
+// to the callback must carry both unchanged.
+#[tokio::test]
+async fn test_request_signature_with_stub_signer() -> Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let (trading_account, signer, agent) = deploy_with_stub_signer(&worker).await?;
+
+    let actions_json = r#"[
+        {"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"alice.near","token_id":"nep141:wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"},
+        {"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"bob.near","token_id":"nep141:wrap.near","amount":"2000"},"gas":"30000000000000","deposit":"10"}
+    ]"#;
+    let (signed_base64, expected_signed) = request_signature_with_stub(
+        &trading_account,
+        &signer,
+        &agent,
+        actions_json,
+        5,
+        [0u8; 32],
+    )
+    .await?;
 
     let signed = near_sdk::base64::Engine::decode(
         &near_sdk::base64::engine::general_purpose::STANDARD,
-        outcome.json::<String>()?,
+        signed_base64,
     )?;
     assert_eq!(signed, expected_signed);
+    Ok(())
+}
+
+/// Broadcasts a base64 signed transaction with the sandbox's `send_tx` RPC and returns the
+/// JSON-RPC response. near-workspaces only sends transactions it signs itself.
+async fn broadcast(worker: &Worker<Sandbox>, signed_tx_base64: &str) -> Result<serde_json::Value> {
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": "0",
+        "method": "send_tx",
+        "params": { "signed_tx_base64": signed_tx_base64, "wait_until": "EXECUTED_OPTIMISTIC" },
+    });
+    let response = reqwest::Client::new()
+        .post(worker.rpc_addr())
+        .header("content-type", "application/json")
+        .body(request.to_string())
+        .send()
+        .await?
+        .text()
+        .await?;
+    Ok(serde_json::from_str(&response)?)
+}
+
+// Pen test findings #5 and #6 (ft-core#1791). A transaction the bot already had signed stays valid
+// until it expires, about a day later, unless the MPC key is deleted. Two transactions are signed
+// up front. The first is the control: broadcasting it works while the key exists. After the owner
+// deletes the key, broadcasting the second fails with an unknown-key error, and adding the key
+// back doesn't revive it.
+#[tokio::test]
+async fn test_delete_key_invalidates_signed_transactions() -> Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let (trading_account, signer, agent) = deploy_with_stub_signer(&worker).await?;
+    let mpc_key = test_support::mpc_public_key();
+    trading_account
+        .call("add_full_access_key")
+        .args_json(json!({ "public_key": mpc_key }))
+        .transact()
+        .await?
+        .into_result()?;
+    let nonce = worker
+        .view_access_key(trading_account.id(), &mpc_key.parse()?)
+        .await?
+        .nonce;
+    let block_hash = worker.view_block().await?.hash().0;
+
+    let actions_json = r#"[{"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"alice.near","token_id":"nep141:wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"}]"#;
+    let (control, _) = request_signature_with_stub(
+        &trading_account,
+        &signer,
+        &agent,
+        actions_json,
+        nonce + 1,
+        block_hash,
+    )
+    .await?;
+    let (hoarded, _) = request_signature_with_stub(
+        &trading_account,
+        &signer,
+        &agent,
+        actions_json,
+        nonce + 2,
+        block_hash,
+    )
+    .await?;
+
+    // Accepted. Its receipt then fails because the sandbox has no intents.near, which doesn't matter.
+    let response = broadcast(&worker, &control).await?;
+    assert!(response.get("error").is_none(), "{}", response);
+
+    trading_account
+        .call("delete_key")
+        .args_json(json!({ "public_key": mpc_key }))
+        .deposit(NearToken::from_yoctonear(1))
+        .transact()
+        .await?
+        .into_result()?;
+
+    let response = broadcast(&worker, &hoarded).await?;
+    assert!(
+        response.to_string().contains("AccessKeyNotFound"),
+        "{}",
+        response
+    );
+
+    // A re-added key starts at a nonce based on the current block height, above the hoarded one.
+    trading_account
+        .call("add_full_access_key")
+        .args_json(json!({ "public_key": mpc_key }))
+        .transact()
+        .await?
+        .into_result()?;
+    let response = broadcast(&worker, &hoarded).await?;
+    assert!(
+        response.to_string().contains("InvalidNonce"),
+        "{}",
+        response
+    );
     Ok(())
 }
