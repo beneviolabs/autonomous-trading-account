@@ -200,7 +200,8 @@ impl TradingAccountContract {
             .unwrap_or_else(|_| env::panic_str("invalid code hash"));
 
         // One batch on this account: the code swap and migrate share a receipt, so a migrate
-        // panic reverts the swap.
+        // panic reverts the swap. Don't chain migrate with .then: that is a second receipt, so
+        // the swap would commit on its own and leave the new code on unmigrated state.
         Promise::new(env::current_account_id())
             .use_global_contract(hash)
             .function_call(

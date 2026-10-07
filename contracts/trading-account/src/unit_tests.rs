@@ -1129,6 +1129,8 @@ fn test_upgrade_rejects_a_stranger() {
     let _ = upgrade_as(stranger(), 1);
 }
 
+// NEAR reverts a receipt only as a whole. Split across receipts (a .then), a failed migrate
+// would leave the swapped code running on unmigrated state.
 #[test]
 fn test_do_upgrade_switches_code_then_migrates_in_one_receipt() {
     let receipts = receipts_of(do_upgrade(LATEST_HASH, LATEST_HASH));
