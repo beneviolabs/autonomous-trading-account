@@ -406,3 +406,73 @@ async fn test_request_signature_rejects_nonce_from_a_future_block() -> Result<()
     assert!(failures.contains("Invalid nonce"), "{}", failures);
     Ok(())
 }
+
+// ---- Versioned state and migrate ----
+
+#[tokio::test]
+async fn test_contract_version_view() -> Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let trading_account = deploy_trading_account(&worker).await?;
+
+    let version: serde_json::Value = trading_account.view("contract_version").await?.json()?;
+    assert_eq!(
+        version,
+        json!({ "contract_version": "1.0.0", "state_version": 1 })
+    );
+    Ok(())
+}
+
+// migrate rewrites the whole state, so only the account itself may call it.
+#[tokio::test]
+async fn test_migrate_is_private() -> Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let trading_account = deploy_trading_account(&worker).await?;
+    let stranger = worker.dev_create_account().await?;
+
+    let outcome = stranger
+        .call(trading_account.id(), "migrate")
+        .transact()
+        .await?;
+
+    assert!(outcome.is_failure());
+    let failures = format!("{:?}", outcome.failures());
+    assert!(
+        failures.contains("Method migrate is private"),
+        "{}",
+        failures
+    );
+    Ok(())
+}
+
+// A redundant upgrade re-runs migrate at the current version, which must change nothing.
+#[tokio::test]
+async fn test_migrate_at_current_version_keeps_state() -> Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let trading_account = deploy_trading_account(&worker).await?;
+    let agent = worker.dev_create_account().await?;
+    trading_account
+        .call("add_agent")
+        .args_json(json!({ "account_id": agent.id() }))
+        .transact()
+        .await?
+        .into_result()?;
+    let before = trading_account.view_state().await?;
+
+    let outcome = trading_account
+        .call("migrate")
+        .transact()
+        .await?
+        .into_result()?;
+
+    assert_eq!(trading_account.view_state().await?, before);
+    assert!(
+        outcome
+            .logs()
+            .iter()
+            .any(|log| log.starts_with("EVENT_JSON:")),
+        "{:?}",
+        outcome.logs()
+    );
+    assert!(is_agent(&trading_account, agent.id()).await?);
+    Ok(())
+}

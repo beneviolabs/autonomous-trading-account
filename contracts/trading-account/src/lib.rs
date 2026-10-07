@@ -1,4 +1,5 @@
 use near_sdk::base64;
+use near_sdk::borsh::BorshDeserialize;
 use near_sdk::collections::UnorderedSet;
 
 use near_sdk::json_types::{Base58CryptoHash, U64};
@@ -42,12 +43,32 @@ const MAX_AGENTS: u64 = 10; // Maximum number of agents per trading account
 // NEAR accepts a transaction nonce only below block height * this multiplier (nearcore's name).
 const ACCESS_KEY_NONCE_RANGE_MULTIPLIER: u64 = 1_000_000;
 const NEAR_INTENTS_ADDRESS: &AccountIdRef = AccountIdRef::new_or_panic("intents.near");
+const CONTRACT_VERSION: &str = "1.0.0"; // Semver of the interface. Bumps every release.
+const STATE_VERSION: u8 = 1; // The shape of STATE. Bumps only when its Borsh bytes change.
+// v0 state has no version byte. Its first byte is the low byte of owner_id's length, and every
+// v0 owner is a 64-character implicit account.
+const V0_OWNER_LEN: u8 = 64;
+
+// migrate tells v0 state apart only while no state version can equal V0_OWNER_LEN. Remove the
+// v0 migration, and this assert, once no account runs v0.
+const _: () = assert!(STATE_VERSION < V0_OWNER_LEN);
 
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
 pub struct TradingAccountContract {
+    // Must stay first; migrate dispatches on this byte.
+    state_version: u8,
     owner_id: AccountId,
     agents: UnorderedSet<AccountId>,
+    signer_id: AccountId,
+}
+
+// v0's layout, kept only so migrate can read v0 state.
+#[derive(BorshDeserialize)]
+#[borsh(crate = "near_sdk::borsh")]
+struct StateV0 {
+    owner_id: AccountId,
+    authorized_users: UnorderedSet<AccountId>,
     signer_id: AccountId,
 }
 
@@ -69,10 +90,76 @@ impl TradingAccountContract {
         assert!(!env::state_exists(), "Contract is already initialized");
 
         Self {
+            state_version: STATE_VERSION,
             owner_id,
             agents: UnorderedSet::new(b"a"),
             signer_id,
         }
+    }
+
+    /// The versions compiled into the running code. migrate guarantees the stored state matches.
+    pub fn contract_version(&self) -> ContractVersion {
+        ContractVersion {
+            contract_version: CONTRACT_VERSION.into(),
+            state_version: STATE_VERSION,
+        }
+    }
+
+    /// Brings any older state up to STATE_VERSION. Runs in the same receipt as the code swap, so a
+    /// panic here reverts the swap too.
+    #[private]
+    #[init(ignore_state)]
+    pub fn migrate() -> Self {
+        let raw =
+            env::storage_read(b"STATE").unwrap_or_else(|| env::panic_str("no state to migrate"));
+        let (from_state_version, migrated, agents) = match raw[0] {
+            STATE_VERSION => {
+                let migrated = Self::try_from_slice(&raw)
+                    .unwrap_or_else(|_| env::panic_str("state unreadable"));
+                let agents = migrated.agents.to_vec();
+                (STATE_VERSION, migrated, agents)
+            }
+            // Must come before the downgrade guard, which would otherwise refuse v0 state.
+            V0_OWNER_LEN => {
+                let v0 = StateV0::try_from_slice(&raw)
+                    .unwrap_or_else(|_| env::panic_str("v0 unreadable"));
+                let agents = v0.authorized_users.to_vec();
+                // The set is moved, not rebuilt, so its prefix and stored agents don't change.
+                let migrated = Self {
+                    state_version: STATE_VERSION,
+                    owner_id: v0.owner_id,
+                    agents: v0.authorized_users,
+                    signer_id: v0.signer_id,
+                };
+                (0, migrated, agents)
+            }
+            v if v > STATE_VERSION => env::panic_str("downgrade not supported"),
+            _ => env::panic_str("unknown state version"),
+        };
+
+        assert_eq!(
+            migrated.state_version, STATE_VERSION,
+            "migration post-condition"
+        );
+        // NEP-297. Logs the agents too: they live under their own storage keys, so the STATE
+        // bytes alone couldn't restore a set a bad migration lost.
+        let event = serde_json::json!({
+            "standard": "trading_account",
+            "version": "1.0.0",
+            "event": "migrated",
+            "data": [{
+                "from_state_version": from_state_version,
+                "to_state_version": STATE_VERSION,
+                "state": base64::Engine::encode(
+                    &base64::engine::general_purpose::STANDARD,
+                    &raw,
+                ),
+                "agents": agents,
+            }],
+        });
+        env::log_str(&format!("EVENT_JSON:{}", event));
+
+        migrated
     }
 
     // Owner methods for managing agents

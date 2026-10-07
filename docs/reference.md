@@ -24,6 +24,8 @@ The public methods of both contracts, with who may call them and what isn't obvi
 | `remove_agent(account_id)` | owner | |
 | `is_agent(account_id)` | view | True only for agents. The owner isn't one unless it adds itself. |
 | `get_agents`, `get_owner_id`, `get_signer_id` | view | |
+| `contract_version` | view | `{"contract_version": "1.0.0", "state_version": 1}`: the versions compiled into the running code. |
+| `migrate` | the account itself (*private*) | Brings older stored state up to the current state version. Runs after a code swap. Logs a `migrated` event with the pre-migration state and agents. |
 | `set_signer_id(signer_id)` | owner | Changes the MPC signer contract. |
 | `request_signature(...)` *payable* | agents | See below. |
 | `add_full_access_key(public_key)` | owner | Registers the MPC key, or the owner's own key before deleting the account. |
