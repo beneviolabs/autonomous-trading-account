@@ -1,16 +1,22 @@
 # Trading account
 
-The per-user contract, created by the [factory](factory.md) at `implicit_<24hex>.auth.peerfolio.near`. The owner moves in only the funds an agent may trade with. Authorized users can then have the MPC signer sign transactions from the trading account, limited to an allowlist. Method details are in the [reference](reference.md#trading-account).
+The per-user contract, created by the [factory](factory.md) at `implicit_<24hex>.auth.peerfolio.near`. The owner moves in only the funds an agent may trade with. Agents can then have the MPC signer sign transactions from the trading account, limited to an allowlist. Method details are in the [reference](reference.md#trading-account).
+
+## Glossary
+
+- **Owner**: the user's NEAR account that controls the trading account.
+- **Agent**: an account the owner allows to request signatures, usually Peerfolio's bot `bot.peerfolio.near`. A trading account can have at most 10.
+- **MPC signer**: the chain-signatures contract set by `signer_id`. It signs transactions for the trading account.
+- **Trading account**: this contract.
 
 ## Security model
 
 - The MPC key is derived from the trading account and a derivation path, so only the trading account contract can get signatures for it. The key has full access to the trading account.
-- The contract signs only transactions to allowlisted contracts and methods, defined in [`actions.rs`](../contracts/trading-account/src/actions.rs):
-  - contracts: `wrap.near`, `intents.near`, `wrap.testnet`
-  - methods: `add_public_key`, `ft_transfer_call`, `near_deposit`, `mt_transfer_call`, `mt_transfer`, `ft_withdraw`
-- **Arguments aren't checked.** Every allowed method is allowed on every allowed contract. An authorized user can call `ft_withdraw` or `mt_transfer` on `intents.near` with any recipient. Only authorize accounts you trust with the trading account's funds.
-- An authorized user can also change the MPC signer contract with `set_signer_id`.
-- **The owner isn't an authorized user** unless it adds itself, so it can't call `request_signature` by default.
+- The contract signs only one call: `mt_transfer` on `intents.near`, the allowlist in [`actions.rs`](../contracts/trading-account/src/actions.rs). Every other contract and method is rejected, and so are bare NEAR transfers.
+- **Arguments aren't checked.** An agent can `mt_transfer` any token the trading account holds on `intents.near` to any recipient. Only add agents you trust with the trading account's funds.
+- **Only the owner can change the MPC signer contract**, with `set_signer_id`. The trading account only returns a transaction whose signature recovers to the transaction's own MPC key.
+- **The owner isn't an agent** unless it adds itself, so it can't call `request_signature` by default.
+- **To cut off an agent at once**, remove it with `remove_agent` and delete the MPC key with `delete_key`. Removing the agent alone leaves transactions it already had signed valid until they expire, about 24 hours later. Deleting the key also stops all signing until the owner adds it back with `add_full_access_key`. Adding it back doesn't revive transactions signed before the deletion. The contract only signs nonces below the current block height × 1,000,000, and a re-added key starts above that.
 - **The trading account never broadcasts anything.** It returns a signed transaction, and the caller broadcasts it. The transaction runs from the trading account, so gas and attached deposits come out of its balance.
 - The allowlist is compiled in. Changing it means [releasing new trading account code](releases.md#release-trading-account-code), and existing trading accounts keep their old code.
 
@@ -19,7 +25,7 @@ The per-user contract, created by the [factory](factory.md) at `implicit_<24hex>
 These commands use testnet and near-cli-rs (tested with 0.22). Variables:
 - `$OWNER`: a funded NEAR implicit account. To make one, run `near account create-account fund-later use-auto-generation save-to-folder <dir>` and send NEAR to the 64-hex ID it prints ([faucet](https://near-faucet.io/)).
 - `$OWNER_KEY`: the owner's key file, `<dir>/<id>.json`. Commands signed by the owner use `sign-with-access-key-file $OWNER_KEY`.
-- `$AGENT`: the authorized user. Peerfolio's mainnet agent is `bot.peerfolio.near`. There's no live testnet agent, so use any testnet account you control.
+- `$AGENT`: the agent. Peerfolio's mainnet agent is `bot.peerfolio.near`. There's no live testnet agent, so use any testnet account you control.
 - `$TA`: the trading account ID.
 
 1. **Create** the trading account. The owner must sign. Look up its name first:
@@ -30,16 +36,16 @@ These commands use testnet and near-cli-rs (tested with 0.22). Variables:
    near contract call-function as-transaction auth.peerfolio.testnet deposit_and_create_proxy_global json-args "{\"owner_id\":\"$OWNER\"}" prepaid-gas '300.0 Tgas' attached-deposit '0.12 NEAR' sign-as $OWNER network-config testnet sign-with-access-key-file $OWNER_KEY send
    ```
    `$TA` is `<name>.auth.peerfolio.testnet`. Store it; don't re-derive it later.
-2. **Derive the MPC key.** By convention, the derivation path is the trading account ID. It returns the key with its `secp256k1:` prefix; use that whole value wherever the commands below say `<MPC key>`.
+2. **Derive the MPC key.** By convention, the derivation path is the agent's account ID. It returns the key with its `secp256k1:` prefix; use that whole value wherever the commands below say `<MPC key>`.
    ```bash
-   near contract call-function as-read-only v1.signer-prod.testnet derived_public_key json-args "{\"path\":\"$TA\",\"predecessor\":\"$TA\",\"domain_id\":0}" network-config testnet now
+   near contract call-function as-read-only v1.signer-prod.testnet derived_public_key json-args "{\"path\":\"$AGENT\",\"predecessor\":\"$TA\",\"domain_id\":0}" network-config testnet now
    ```
 3. **Register the key and authorize the agent**, as the owner:
    ```bash
    near contract call-function as-transaction $TA add_full_access_key json-args '{"public_key":"<MPC key>"}' prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' sign-as $OWNER network-config testnet sign-with-access-key-file $OWNER_KEY send
    ```
    ```bash
-   near contract call-function as-transaction $TA add_authorized_user json-args "{\"account_id\":\"$AGENT\"}" prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' sign-as $OWNER network-config testnet sign-with-access-key-file $OWNER_KEY send
+   near contract call-function as-transaction $TA add_agent json-args "{\"account_id\":\"$AGENT\"}" prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' sign-as $OWNER network-config testnet sign-with-access-key-file $OWNER_KEY send
    ```
 4. **Fund it** with what the agent may trade. Keep some NEAR there at all times, because it pays gas for every signed transaction.
    ```bash
@@ -67,9 +73,9 @@ These commands use testnet and near-cli-rs (tested with 0.22). Variables:
       ```bash
       curl -s https://rpc.testnet.near.org -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"block","params":{"finality":"final"}}' | jq -r .result.header.hash
       ```
-   2. Request the signature. This one wraps 0.05 NEAR; the first wrap keeps 0.00125 of it for `wrap.testnet` storage, so 0.04875 wNEAR arrives. `actions_json` is a JSON *string*, and `nonce` is the current nonce + 1.
+   2. Request the signature. This one moves wNEAR the trading account holds on `intents.near` to the owner (`amount` is in wNEAR's smallest unit). `intents.near` only exists on mainnet, so on testnet the transaction is signed but fails when broadcast. `actions_json` is a JSON *string*, and `nonce` is the current nonce + 1.
       ```bash
-      near contract call-function as-transaction $TA request_signature json-args "{\"contract_id\":\"wrap.testnet\",\"actions_json\":\"[{\\\"type\\\":\\\"FunctionCall\\\",\\\"method_name\\\":\\\"near_deposit\\\",\\\"args\\\":{},\\\"gas\\\":\\\"30000000000000\\\",\\\"deposit\\\":\\\"50000000000000000000000\\\"}]\",\"nonce\":\"<nonce + 1>\",\"block_hash\":\"<block hash>\",\"mpc_signer_pk\":\"<MPC key>\",\"derivation_path\":\"$TA\"}" prepaid-gas '300.0 Tgas' attached-deposit '1 yoctoNEAR' sign-as $AGENT network-config testnet sign-with-keychain send
+      near contract call-function as-transaction $TA request_signature json-args "{\"contract_id\":\"intents.near\",\"actions_json\":\"[{\\\"type\\\":\\\"FunctionCall\\\",\\\"method_name\\\":\\\"mt_transfer\\\",\\\"args\\\":{\\\"receiver_id\\\":\\\"$OWNER\\\",\\\"token_id\\\":\\\"nep141:wrap.near\\\",\\\"amount\\\":\\\"1000\\\"},\\\"gas\\\":\\\"30000000000000\\\",\\\"deposit\\\":\\\"1\\\"}]\",\"nonce\":\"<nonce + 1>\",\"block_hash\":\"<block hash>\",\"mpc_signer_pk\":\"<MPC key>\",\"derivation_path\":\"$AGENT\"}" prepaid-gas '300.0 Tgas' attached-deposit '1 yoctoNEAR' sign-as $AGENT network-config testnet sign-with-keychain send
       ```
    3. Broadcast the base64 value it returns:
       ```bash

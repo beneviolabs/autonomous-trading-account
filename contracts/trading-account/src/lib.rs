@@ -14,20 +14,20 @@ use omni_transaction::near::types::Secp256K1Signature;
 use omni_transaction::near::utils::PublicKeyStrExt;
 use omni_transaction::{
     NEAR,
+    near::NearTransaction,
     near::types::{
         Action as OmniAction, BlockHash as OmniBlockHash,
-        FunctionCallAction as OmniFunctionCallAction, Signature, U128 as OmniU128,
+        FunctionCallAction as OmniFunctionCallAction, PublicKey as OmniPublicKey,
+        Secp256K1PublicKey, Signature,
     },
 };
 
 pub use crate::models::*;
-pub use crate::serializer::SafeU128;
 
 mod actions;
 #[cfg(all(test, feature = "integration-tests"))]
 mod integration_tests;
 mod models;
-mod serializer;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]
@@ -38,14 +38,16 @@ const GAS_FOR_REQUEST_SIGNATURE: Gas = Gas::from_tgas(100);
 const BASE_GAS: Gas = Gas::from_tgas(10); // Base gas for contract execution
 const CALLBACK_GAS: Gas = Gas::from_tgas(10); // Gas reserved for callback
 const NEAR_MPC_DOMAIN_ID: u32 = 0;
-const MAX_AUTHORIZED_USERS: u64 = 10; // Maximum number of authorized users per trading account
+const MAX_AGENTS: u64 = 10; // Maximum number of agents per trading account
+// NEAR accepts a transaction nonce only below block height * this multiplier (nearcore's name).
+const ACCESS_KEY_NONCE_RANGE_MULTIPLIER: u64 = 1_000_000;
 const NEAR_INTENTS_ADDRESS: &AccountIdRef = AccountIdRef::new_or_panic("intents.near");
 
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
 pub struct TradingAccountContract {
     owner_id: AccountId,
-    authorized_users: UnorderedSet<AccountId>,
+    agents: UnorderedSet<AccountId>,
     signer_id: AccountId,
 }
 
@@ -58,9 +60,6 @@ pub enum ActionString {
         gas: String,
         deposit: String,
     },
-    Transfer {
-        deposit: String,
-    },
 }
 
 #[near]
@@ -71,36 +70,36 @@ impl TradingAccountContract {
 
         Self {
             owner_id,
-            authorized_users: UnorderedSet::new(b"a"),
+            agents: UnorderedSet::new(b"a"),
             signer_id,
         }
     }
 
-    // Owner methods for managing authorized users
-    pub fn add_authorized_user(&mut self, account_id: AccountId) {
+    // Owner methods for managing agents
+    pub fn add_agent(&mut self, account_id: AccountId) {
         self.assert_owner();
 
         // Check maximum limit before adding
         assert!(
-            self.authorized_users.len() < MAX_AUTHORIZED_USERS,
-            "Maximum number of authorized users reached:({}). One must be removed before adding another.",
-            MAX_AUTHORIZED_USERS
+            self.agents.len() < MAX_AGENTS,
+            "Maximum number of agents reached:({}). One must be removed before adding another.",
+            MAX_AGENTS
         );
 
-        self.authorized_users.insert(&account_id);
+        self.agents.insert(&account_id);
     }
 
-    pub fn remove_authorized_user(&mut self, account_id: AccountId) {
+    pub fn remove_agent(&mut self, account_id: AccountId) {
         self.assert_owner();
-        self.authorized_users.remove(&account_id);
+        self.agents.remove(&account_id);
     }
 
-    pub fn is_authorized(&self, account_id: AccountId) -> bool {
-        self.authorized_users.contains(&account_id) || self.owner_id == account_id
+    pub fn is_agent(&self, account_id: AccountId) -> bool {
+        self.agents.contains(&account_id)
     }
 
-    pub fn get_authorized_users(&self) -> Vec<AccountId> {
-        self.authorized_users.to_vec()
+    pub fn get_agents(&self) -> Vec<AccountId> {
+        self.agents.to_vec()
     }
 
     pub fn get_owner_id(&self) -> AccountId {
@@ -112,10 +111,7 @@ impl TradingAccountContract {
     }
 
     pub fn set_signer_id(&mut self, signer_id: AccountId) {
-        assert!(
-            self.is_authorized(env::predecessor_account_id()),
-            "Unauthorized: only authorized users can set signer ID"
-        );
+        self.assert_owner();
         self.signer_id = signer_id;
     }
 
@@ -138,21 +134,6 @@ impl TradingAccountContract {
             return Err("Actions cannot be empty. At least one action is required.".to_string());
         }
 
-        // Ensure Transfer actions are accompanied by at least one FunctionCall action
-        let has_transfer = actions
-            .iter()
-            .any(|action| matches!(action, ActionString::Transfer { .. }));
-        let has_function_call = actions
-            .iter()
-            .any(|action| matches!(action, ActionString::FunctionCall { .. }));
-
-        if has_transfer && !has_function_call {
-            return Err(
-                "Transfer actions must be accompanied by at least one FunctionCall action"
-                    .to_string(),
-            );
-        }
-
         actions
             .into_iter()
             .map(|action| match action {
@@ -166,7 +147,6 @@ impl TradingAccountContract {
                     let deposit_near = NearToken::from_yoctonear(
                         deposit.parse().map_err(|_| "Invalid deposit format")?,
                     );
-                    let safe_deposit = SafeU128(deposit_near.as_yoctonear());
                     actions::check_allowlist(contract_id, &method_name)?;
 
                     let args_bytes = serde_json::to_vec(&args)
@@ -176,19 +156,8 @@ impl TradingAccountContract {
                         method_name,
                         args: args_bytes,
                         gas,
-                        deposit: NearToken::from_yoctonear(safe_deposit.0),
+                        deposit: deposit_near,
                     })))
-                }
-                ActionString::Transfer { deposit } => {
-                    let deposit_near = NearToken::from_yoctonear(
-                        deposit.parse().map_err(|_| "Invalid deposit format")?,
-                    );
-                    let safe_deposit = SafeU128(deposit_near.as_yoctonear());
-                    Ok(OmniAction::Transfer(
-                        omni_transaction::near::types::TransferAction {
-                            deposit: NearToken::from_yoctonear(safe_deposit.0),
-                        },
-                    ))
                 }
             })
             .collect()
@@ -197,9 +166,8 @@ impl TradingAccountContract {
     /// Create signature request from transaction and required parameters
     fn create_signature_request(
         &self,
-        tx: &omni_transaction::near::NearTransaction,
+        tx: &NearTransaction,
         derivation_path: String,
-        domain_id: Option<u32>,
     ) -> serde_json::Value {
         let hashed_payload = utils::hash_payload(&tx.build_for_signing());
 
@@ -208,28 +176,14 @@ impl TradingAccountContract {
                 ecdsa: hex::encode(hashed_payload),
             },
             path: derivation_path,
-            domain_id: domain_id.unwrap_or(NEAR_MPC_DOMAIN_ID), // domain_id != 0 requires a transaction payload for the target chain e.g. SOL
+            domain_id: NEAR_MPC_DOMAIN_ID, // 0 is secp256k1, the only domain the signature check supports
         };
 
         serde_json::json!({ "request": sign_request })
     }
 
-    /// Convert deposit numbers to strings in JSON
-    fn convert_deposits_to_strings(&self, tx_json_string: String, deposits: &[OmniU128]) -> String {
-        // Interestingly, I was unable to find a way to use regex for a more robust replacement of deposit
-        // numbers to strings without completely blowing up the gas cost such that all requests failed with
-        // Exceeds Prepaid Gas.
-        deposits.iter().fold(tx_json_string, |acc, deposit| {
-            acc.replace(
-                &format!("\"deposit\":{}", deposit.0),
-                &format!("\"deposit\":\"{}\"", deposit.0),
-            )
-        })
-    }
-
     // Request a signature from the MPC signer
     #[payable]
-    #[allow(clippy::too_many_arguments)]
     pub fn request_signature(
         &mut self,
         contract_id: AccountId,
@@ -238,7 +192,6 @@ impl TradingAccountContract {
         block_hash: Base58CryptoHash,
         mpc_signer_pk: String,
         derivation_path: String,
-        domain_id: Option<u32>,
     ) -> Promise {
         let attached_gas = env::prepaid_gas();
         assert!(
@@ -249,9 +202,16 @@ impl TradingAccountContract {
         );
 
         assert!(
-            self.authorized_users
-                .contains(&env::predecessor_account_id()),
-            "Unauthorized: only authorized users can request signatures"
+            self.agents.contains(&env::predecessor_account_id()),
+            "Unauthorized: only agents can request signatures"
+        );
+
+        // A nonce for a future block makes a transaction that only becomes valid later, so it could
+        // outlive delete_key plus re-adding the key. A re-added key starts above this limit.
+        assert!(
+            nonce.0 < env::block_height() * ACCESS_KEY_NONCE_RANGE_MULTIPLIER,
+            "Invalid nonce: must be below the current block height × {}",
+            ACCESS_KEY_NONCE_RANGE_MULTIPLIER
         );
 
         // Parse actions from JSON string
@@ -308,25 +268,9 @@ impl TradingAccountContract {
             tx.actions.len()
         ));
 
-        // Extract deposit values from omni_actions
-        let deposits: Vec<OmniU128> = omni_actions
-            .iter()
-            .map(|action| match action {
-                OmniAction::FunctionCall(call) => OmniU128(call.deposit.as_yoctonear()),
-                OmniAction::Transfer(transfer) => OmniU128(transfer.deposit.as_yoctonear()),
-                _ => OmniU128(0),
-            })
-            .collect();
-
-        near_sdk::env::log_str(&format!("Action deposits: {:?}", deposits));
-
         // Serialize transaction into a string to pass into callback
-        let mut tx_json_string = serde_json::to_string(&tx)
+        let tx_json_string = serde_json::to_string(&tx)
             .expect("Internal bug: transaction serialization should never fail");
-
-        // Convert large deposit numbers to strings for JSON compatibility
-        tx_json_string = self.convert_deposits_to_strings(tx_json_string, &deposits);
-        near_sdk::env::log_str(&format!("near tx in json: {}", tx_json_string));
 
         near_sdk::env::log_str(&format!(
             "Transaction details - Receiver: {}, Signer: {}, Actions: {:?}, Nonce: {}, BlockHash: {:?}",
@@ -338,8 +282,7 @@ impl TradingAccountContract {
         ));
 
         // Create signature request
-        let request_payload =
-            self.create_signature_request(&tx, derivation_path.clone(), domain_id);
+        let request_payload = self.create_signature_request(&tx, derivation_path.clone());
 
         let request_payload_bytes = match near_sdk::serde_json::to_vec(&request_payload) {
             Ok(bytes) => bytes,
@@ -378,6 +321,16 @@ impl TradingAccountContract {
     pub fn add_full_access_key(&mut self, public_key: PublicKey) -> Promise {
         self.assert_owner();
         Promise::new(env::current_account_id()).add_full_access_key(public_key)
+    }
+
+    /// Deletes `public_key` from the trading account. Deleting the MPC key invalidates every
+    /// transaction it already signed that hasn't been broadcast. Owner only, with exactly 1 yoctoNEAR
+    /// attached so the owner must sign with a full-access key.
+    #[payable]
+    pub fn delete_key(&mut self, public_key: PublicKey) -> Promise {
+        self.assert_owner();
+        near_sdk::assert_one_yocto();
+        Promise::new(env::current_account_id()).delete_key(public_key)
     }
 
     #[payable]
@@ -425,7 +378,7 @@ impl TradingAccountContract {
         };
 
         // Deserialize transaction that we serialized in request_signature
-        let near_tx = serde_json::from_str::<models::NearTransaction>(&tx_json_string)
+        let near_tx = serde_json::from_str::<NearTransaction>(&tx_json_string)
             .expect("Internal bug: failed to deserialize our own transaction JSON");
 
         let message_hash = utils::hash_payload(&near_tx.build_for_signing());
@@ -444,19 +397,23 @@ impl TradingAccountContract {
             signature.extend_from_slice(&r);
             signature.extend_from_slice(&s);
 
-            // Verify signature
-            let recovered = self.test_recover(message_hash.to_vec(), signature, v);
-            match recovered {
-                Some(public_key) => {
+            // Verify signature: it must recover to the key the transaction is signed for
+            let Some(recovered_key) = self.recover_key(message_hash.to_vec(), signature, v) else {
+                near_sdk::env::log_str("Signature verification failed!");
+                near_sdk::env::panic_str("Invalid signature: ecrecover failed");
+            };
+            match &near_tx.signer_public_key {
+                OmniPublicKey::SECP256K1(Secp256K1PublicKey(tx_key))
+                    if *tx_key == recovered_key =>
+                {
                     near_sdk::env::log_str(&format!(
                         "Signature verified! Recovered public key: {}",
-                        public_key
+                        near_tx.signer_public_key
                     ));
                 }
-                None => {
-                    near_sdk::env::log_str("Signature verification failed!");
-                    near_sdk::env::panic_str("Invalid signature: ecrecover failed");
-                }
+                _ => near_sdk::env::panic_str(
+                    "Invalid signature: recovered key doesn't match the transaction's public key",
+                ),
             }
 
             // Add individual bytes together in the correct order
@@ -481,22 +438,13 @@ impl TradingAccountContract {
         base64_tx
     }
 
-    fn test_recover(&self, hash: Vec<u8>, signature: Vec<u8>, v: u8) -> Option<String> {
+    fn recover_key(&self, hash: Vec<u8>, signature: Vec<u8>, v: u8) -> Option<[u8; 64]> {
         let recovered: Option<[u8; 64]> = env::ecrecover(&hash, &signature, v, true);
 
         env::log_str(&format!("Hash: {}", hex::encode(&hash)));
         env::log_str(&format!("Signature: {}", hex::encode(&signature)));
         env::log_str(&format!("V: {}", v));
 
-        recovered.map(|key: [u8; 64]| {
-            // Add prefix byte for secp256k1 (0x01)
-            let mut prefixed_key = vec![0x01];
-            prefixed_key.extend_from_slice(&key);
-
-            let key = format!("secp256k1:{}", bs58::encode(&prefixed_key).into_string());
-
-            env::log_str(&format!("Recovered key: {}", key));
-            key
-        })
+        recovered
     }
 }

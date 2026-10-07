@@ -20,13 +20,14 @@ The public methods of both contracts, with who may call them and what isn't obvi
 | Method | Caller | Notes |
 |---|---|---|
 | `new(owner_id, signer_id)` | init (factory) | |
-| `add_authorized_user(account_id)` | owner | Panics at 10 users. |
-| `remove_authorized_user(account_id)` | owner | |
-| `is_authorized(account_id)` | view | Also true for the owner, although the owner can't call `request_signature` unless it adds itself. |
-| `get_authorized_users`, `get_owner_id`, `get_signer_id` | view | |
-| `set_signer_id(signer_id)` | owner or any authorized user | Changes the MPC signer contract. |
-| `request_signature(...)` *payable* | authorized users | See below. |
+| `add_agent(account_id)` | owner | Panics at 10 agents. |
+| `remove_agent(account_id)` | owner | |
+| `is_agent(account_id)` | view | True only for agents. The owner isn't one unless it adds itself. |
+| `get_agents`, `get_owner_id`, `get_signer_id` | view | |
+| `set_signer_id(signer_id)` | owner | Changes the MPC signer contract. |
+| `request_signature(...)` *payable* | agents | See below. |
 | `add_full_access_key(public_key)` | owner | Registers the MPC key, or the owner's own key before deleting the account. |
+| `delete_key(public_key)` *payable, exactly 1 yocto* | owner | Deletes an access key from the trading account. Deleting the MPC key invalidates every transaction it signed that hasn't been broadcast yet. |
 | `add_full_access_key_and_register_with_intents(public_key)` *payable, exactly 1 yocto* | owner | Also registers the key on `intents.near`. That call fails on testnet, but the key is still added. |
 
 ### `request_signature`
@@ -35,13 +36,12 @@ Attach at least 100 Tgas (300 recommended) and 1 yoctoNEAR, which is forwarded t
 
 | Argument | Notes |
 |---|---|
-| `contract_id` | Receiver of the signed transaction. Must be allowlisted. |
-| `actions_json` | A JSON **string** holding a non-empty array, e.g. `[{"type":"FunctionCall","method_name":"near_deposit","args":{},"gas":"30000000000000","deposit":"50000000000000000000000"}]`. `gas` and `deposit` are strings. `{"type":"Transfer","deposit":"1"}` is only accepted alongside a `FunctionCall`. |
-| `nonce` | Greater than the MPC key's current nonce on the trading account, and unique per pending transaction. |
+| `contract_id` | Receiver of the signed transaction. Must be `intents.near`. |
+| `actions_json` | A JSON **string** holding a non-empty array of `mt_transfer` calls, e.g. `[{"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"alice.near","token_id":"nep141:wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"}]`. `gas` and `deposit` are strings. |
+| `nonce` | Greater than the MPC key's current nonce on the trading account, and unique per pending transaction. It must also be below the current block height × 1,000,000, NEAR's own limit for a transaction that's valid now. |
 | `block_hash` | A recent block hash. The transaction expires about 24h later. |
-| `mpc_signer_pk` | The MPC key, `secp256k1:…`. It isn't checked against the derivation path. |
-| `derivation_path` | The path used to derive `mpc_signer_pk`. By convention, the trading account ID. |
-| `domain_id` | Optional. Only `0` (secp256k1) works. |
+| `mpc_signer_pk` | The MPC key, `secp256k1:…`. The transaction is signed for this key, and the callback rejects a signature that doesn't recover to it. |
+| `derivation_path` | The path the MPC key on the trading account was derived with. Peerfolio uses the agent's account ID, e.g. `bot.peerfolio.near`. |
 
 It returns a base64 borsh `SignedTransaction` from the trading account, also logged as `Signed transaction (base64): …`. The caller must broadcast it. Gas and attached deposits come out of the trading account's balance.
 
@@ -50,8 +50,11 @@ Common failures:
 | Symptom | Cause |
 |---|---|
 | `Failed to deserialize input from JSON … invalid character '<'` | A `<placeholder>` from the docs was left in the arguments. |
-| `Unauthorized: only authorized users can request signatures` | The caller isn't an authorized user. |
-| `… is not allowed` / `Method … is restricted` | The receiver or method isn't allowlisted. |
-| Broadcast rejected: invalid signature | `mpc_signer_pk` doesn't match `derivation_path`, or the key isn't on the trading account. |
+| `Unauthorized: only agents can request signatures` | The caller isn't an agent. |
+| `Invalid nonce: must be below the current block height × 1000000` | The nonce is for a future block. Use the MPC key's current nonce + 1. |
+| `<method> on <contract> is not allowed` | The call isn't `mt_transfer` on `intents.near`, the only one the allowlist permits. |
+| `unknown variant` | An action other than `FunctionCall`, such as a bare `Transfer`. |
+| `Invalid signature: recovered key doesn't match the transaction's public key` | `mpc_signer_pk` isn't the key derived from `derivation_path`, or the signer contract signed with another key. |
+| Broadcast rejected: access key not found | The MPC key isn't on the trading account. |
 | Broadcast rejected: invalid nonce | The nonce was already used. Request again with a higher one. |
 | Broadcast rejected: not enough balance | The trading account can't cover gas or the attached deposit. |

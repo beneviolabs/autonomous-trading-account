@@ -3999,6 +3999,7 @@ dependencies = [
  "near-sdk",
  "near-workspaces",
  "omni-transaction",
+ "reqwest 0.12.24",
  "schemars 0.8.22",
  "secp256k1",
  "serde",

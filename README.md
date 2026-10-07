@@ -9,7 +9,7 @@ NEAR smart contracts that give an AI agent **limited, revocable** authority to t
 owner ──create──▶ factory ──creates──▶ trading account
 agent ──request_signature──▶ trading account ──sign──▶ MPC signer
 agent ◀── signed transaction ──┘
-agent ──broadcast──▶ NEAR ──▶ wrap.near / intents.near (sent from the trading account)
+agent ──broadcast──▶ NEAR ──▶ intents.near mt_transfer (sent from the trading account)
 ```
 
 ## Deployments
@@ -29,7 +29,7 @@ agent ──broadcast──▶ NEAR ──▶ wrap.near / intents.near (sent fro
 ## Terms
 
 - **Owner**: the user's NEAR implicit account (64 hex chars). It creates and controls its trading account.
-- **Authorized user**: an account, usually the agent, allowed to request signatures. At most 10 per trading account.
+- **Agent**: an account allowed to request signatures. At most 10 per trading account.
 - **MPC key**: the key NEAR's MPC signer derives for a trading account. It's added as a full-access key on the trading account and signs every agent transaction.
 - **Global code hash**: the hash of the trading account code deployed once as a [NEP-591 global contract](https://github.com/near/NEPs/blob/master/neps/nep-0591.md). The factory creates new trading accounts with it.
 
