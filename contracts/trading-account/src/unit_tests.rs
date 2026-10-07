@@ -72,7 +72,6 @@ fn request_signature(
         Base58CryptoHash::from([0u8; 32]),
         test_support::mpc_public_key(),
         "trading-account.near".to_string(),
-        None,
     )
 }
 
@@ -536,8 +535,14 @@ fn test_validate_and_build_actions_rejects_empty_actions() {
     assert!(error.contains("Actions cannot be empty"), "{}", error);
 }
 
-/// The arguments request_signature sends to the MPC signer's `sign`, for a fixed transaction.
-fn signature_request(domain_id: Option<u32>) -> serde_json::Value {
+// The payload is sha256 of the transaction's borsh bytes, computed outside the contract.
+const SIGNATURE_REQUEST_PAYLOAD: &str =
+    "9baac0a493bdac2ba1ac8830e178a61c4bed685b2006c66e0ae83adec129aed4";
+
+// The arguments request_signature sends to the MPC signer's `sign`. The domain is always 0
+// (secp256k1): the agent can't choose another one.
+#[test]
+fn test_create_signature_request_always_uses_domain_zero() {
     let tx = omni_transaction::TransactionBuilder::new::<omni_transaction::NEAR>()
         .signer_id("test.near".to_string())
         .signer_public_key(PUBLIC_KEY.to_public_key().unwrap())
@@ -546,33 +551,8 @@ fn signature_request(domain_id: Option<u32>) -> serde_json::Value {
         .block_hash(omni_transaction::near::types::BlockHash([0u8; 32]))
         .actions(vec![])
         .build();
-    trading_account().create_signature_request(
-        &tx,
-        "test.trading-account.near".to_string(),
-        domain_id,
-    )
-}
-
-// The payload is sha256 of the transaction's borsh bytes, computed outside the contract.
-const SIGNATURE_REQUEST_PAYLOAD: &str =
-    "9baac0a493bdac2ba1ac8830e178a61c4bed685b2006c66e0ae83adec129aed4";
-
-#[test]
-fn test_create_signature_request_passes_domain_id() {
     assert_eq!(
-        signature_request(Some(1)),
-        serde_json::json!({ "request": {
-            "payload_v2": { "Ecdsa": SIGNATURE_REQUEST_PAYLOAD },
-            "path": "test.trading-account.near",
-            "domain_id": 1,
-        }})
-    );
-}
-
-#[test]
-fn test_create_signature_request_defaults_domain_id_to_zero() {
-    assert_eq!(
-        signature_request(None),
+        trading_account().create_signature_request(&tx, "test.trading-account.near".to_string()),
         serde_json::json!({ "request": {
             "payload_v2": { "Ecdsa": SIGNATURE_REQUEST_PAYLOAD },
             "path": "test.trading-account.near",
