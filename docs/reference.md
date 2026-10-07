@@ -20,12 +20,12 @@ The public methods of both contracts, with who may call them and what isn't obvi
 | Method | Caller | Notes |
 |---|---|---|
 | `new(owner_id, signer_id)` | init (factory) | |
-| `add_authorized_user(account_id)` | owner | Panics at 10 users. |
-| `remove_authorized_user(account_id)` | owner | |
-| `is_authorized(account_id)` | view | Also true for the owner, although the owner can't call `request_signature` unless it adds itself. |
-| `get_authorized_users`, `get_owner_id`, `get_signer_id` | view | |
+| `add_agent(account_id)` | owner | Panics at 10 agents. |
+| `remove_agent(account_id)` | owner | |
+| `is_agent(account_id)` | view | True only for agents. The owner isn't one unless it adds itself. |
+| `get_agents`, `get_owner_id`, `get_signer_id` | view | |
 | `set_signer_id(signer_id)` | owner | Changes the MPC signer contract. |
-| `request_signature(...)` *payable* | authorized users | See below. |
+| `request_signature(...)` *payable* | agents | See below. |
 | `add_full_access_key(public_key)` | owner | Registers the MPC key, or the owner's own key before deleting the account. |
 | `delete_key(public_key)` *payable, exactly 1 yocto* | owner | Deletes an access key from the trading account. Deleting the MPC key invalidates every transaction it signed that hasn't been broadcast yet. |
 | `add_full_access_key_and_register_with_intents(public_key)` *payable, exactly 1 yocto* | owner | Also registers the key on `intents.near`. That call fails on testnet, but the key is still added. |
@@ -51,7 +51,7 @@ Common failures:
 | Symptom | Cause |
 |---|---|
 | `Failed to deserialize input from JSON … invalid character '<'` | A `<placeholder>` from the docs was left in the arguments. |
-| `Unauthorized: only authorized users can request signatures` | The caller isn't an authorized user. |
+| `Unauthorized: only agents can request signatures` | The caller isn't an agent. |
 | `<method> on <contract> is not allowed` | The call isn't `mt_transfer` on `intents.near`, the only one the allowlist permits. |
 | `unknown variant` | An action other than `FunctionCall`, such as a bare `Transfer`. |
 | `Invalid signature: recovered key doesn't match the transaction's public key` | `mpc_signer_pk` isn't the key derived from `derivation_path`, or the signer contract signed with another key. |

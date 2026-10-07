@@ -29,7 +29,7 @@ agent ──broadcast──▶ NEAR ──▶ wrap.near / intents.near (sent fro
 ## Terms
 
 - **Owner**: the user's NEAR implicit account (64 hex chars). It creates and controls its trading account.
-- **Authorized user**: an account, usually the agent, allowed to request signatures. At most 10 per trading account.
+- **Agent**: an account allowed to request signatures. At most 10 per trading account.
 - **MPC key**: the key NEAR's MPC signer derives for a trading account. It's added as a full-access key on the trading account and signs every agent transaction.
 - **Global code hash**: the hash of the trading account code deployed once as a [NEP-591 global contract](https://github.com/near/NEPs/blob/master/neps/nep-0591.md). The factory creates new trading accounts with it.
 

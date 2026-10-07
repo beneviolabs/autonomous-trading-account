@@ -38,14 +38,14 @@ const GAS_FOR_REQUEST_SIGNATURE: Gas = Gas::from_tgas(100);
 const BASE_GAS: Gas = Gas::from_tgas(10); // Base gas for contract execution
 const CALLBACK_GAS: Gas = Gas::from_tgas(10); // Gas reserved for callback
 const NEAR_MPC_DOMAIN_ID: u32 = 0;
-const MAX_AUTHORIZED_USERS: u64 = 10; // Maximum number of authorized users per trading account
+const MAX_AGENTS: u64 = 10; // Maximum number of agents per trading account
 const NEAR_INTENTS_ADDRESS: &AccountIdRef = AccountIdRef::new_or_panic("intents.near");
 
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
 pub struct TradingAccountContract {
     owner_id: AccountId,
-    authorized_users: UnorderedSet<AccountId>,
+    agents: UnorderedSet<AccountId>,
     signer_id: AccountId,
 }
 
@@ -68,36 +68,36 @@ impl TradingAccountContract {
 
         Self {
             owner_id,
-            authorized_users: UnorderedSet::new(b"a"),
+            agents: UnorderedSet::new(b"a"),
             signer_id,
         }
     }
 
-    // Owner methods for managing authorized users
-    pub fn add_authorized_user(&mut self, account_id: AccountId) {
+    // Owner methods for managing agents
+    pub fn add_agent(&mut self, account_id: AccountId) {
         self.assert_owner();
 
         // Check maximum limit before adding
         assert!(
-            self.authorized_users.len() < MAX_AUTHORIZED_USERS,
-            "Maximum number of authorized users reached:({}). One must be removed before adding another.",
-            MAX_AUTHORIZED_USERS
+            self.agents.len() < MAX_AGENTS,
+            "Maximum number of agents reached:({}). One must be removed before adding another.",
+            MAX_AGENTS
         );
 
-        self.authorized_users.insert(&account_id);
+        self.agents.insert(&account_id);
     }
 
-    pub fn remove_authorized_user(&mut self, account_id: AccountId) {
+    pub fn remove_agent(&mut self, account_id: AccountId) {
         self.assert_owner();
-        self.authorized_users.remove(&account_id);
+        self.agents.remove(&account_id);
     }
 
-    pub fn is_authorized(&self, account_id: AccountId) -> bool {
-        self.authorized_users.contains(&account_id) || self.owner_id == account_id
+    pub fn is_agent(&self, account_id: AccountId) -> bool {
+        self.agents.contains(&account_id)
     }
 
-    pub fn get_authorized_users(&self) -> Vec<AccountId> {
-        self.authorized_users.to_vec()
+    pub fn get_agents(&self) -> Vec<AccountId> {
+        self.agents.to_vec()
     }
 
     pub fn get_owner_id(&self) -> AccountId {
@@ -203,9 +203,8 @@ impl TradingAccountContract {
         );
 
         assert!(
-            self.authorized_users
-                .contains(&env::predecessor_account_id()),
-            "Unauthorized: only authorized users can request signatures"
+            self.agents.contains(&env::predecessor_account_id()),
+            "Unauthorized: only agents can request signatures"
         );
 
         // Parse actions from JSON string
