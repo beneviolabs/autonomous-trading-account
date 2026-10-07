@@ -166,7 +166,6 @@ impl TradingAccountContract {
         &self,
         tx: &NearTransaction,
         derivation_path: String,
-        domain_id: Option<u32>,
     ) -> serde_json::Value {
         let hashed_payload = utils::hash_payload(&tx.build_for_signing());
 
@@ -175,7 +174,7 @@ impl TradingAccountContract {
                 ecdsa: hex::encode(hashed_payload),
             },
             path: derivation_path,
-            domain_id: domain_id.unwrap_or(NEAR_MPC_DOMAIN_ID), // domain_id != 0 requires a transaction payload for the target chain e.g. SOL
+            domain_id: NEAR_MPC_DOMAIN_ID, // 0 is secp256k1, the only domain the signature check supports
         };
 
         serde_json::json!({ "request": sign_request })
@@ -183,7 +182,6 @@ impl TradingAccountContract {
 
     // Request a signature from the MPC signer
     #[payable]
-    #[allow(clippy::too_many_arguments)]
     pub fn request_signature(
         &mut self,
         contract_id: AccountId,
@@ -192,7 +190,6 @@ impl TradingAccountContract {
         block_hash: Base58CryptoHash,
         mpc_signer_pk: String,
         derivation_path: String,
-        domain_id: Option<u32>,
     ) -> Promise {
         let attached_gas = env::prepaid_gas();
         assert!(
@@ -275,8 +272,7 @@ impl TradingAccountContract {
         ));
 
         // Create signature request
-        let request_payload =
-            self.create_signature_request(&tx, derivation_path.clone(), domain_id);
+        let request_payload = self.create_signature_request(&tx, derivation_path.clone());
 
         let request_payload_bytes = match near_sdk::serde_json::to_vec(&request_payload) {
             Ok(bytes) => bytes,

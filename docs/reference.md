@@ -42,7 +42,6 @@ Attach at least 100 Tgas (300 recommended) and 1 yoctoNEAR, which is forwarded t
 | `block_hash` | A recent block hash. The transaction expires about 24h later. |
 | `mpc_signer_pk` | The MPC key, `secp256k1:…`. The transaction is signed for this key, and the callback rejects a signature that doesn't recover to it. |
 | `derivation_path` | The path used to derive `mpc_signer_pk`. By convention, the trading account ID. |
-| `domain_id` | Optional. Only `0` (secp256k1) works. |
 
 It returns a base64 borsh `SignedTransaction` from the trading account, also logged as `Signed transaction (base64): …`. The caller must broadcast it. Gas and attached deposits come out of the trading account's balance.
 
