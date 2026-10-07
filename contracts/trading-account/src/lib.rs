@@ -6,7 +6,7 @@ use near_sdk::json_types::{Base58CryptoHash, U64};
 use near_sdk::serde::Deserialize;
 use near_sdk::{
     AccountId, AccountIdRef, Gas, NearToken, PanicOnDefault, Promise, PromiseError, PublicKey, env,
-    ext_contract, near,
+    near,
 };
 
 use omni_transaction::TransactionBuilder;
@@ -84,13 +84,6 @@ pub enum ActionString {
         gas: String,
         deposit: String,
     },
-}
-
-// Only the generated ext_factory module is used, never the trait itself.
-#[allow(dead_code)]
-#[ext_contract(ext_factory)]
-trait Factory {
-    fn get_proxy_code_base58_hash(&self) -> String;
 }
 
 #[near]
@@ -182,9 +175,13 @@ impl TradingAccountContract {
 
         // Every promise in this chain is returned. A dropped one would let the owner's
         // transaction report success even when a later receipt fails.
-        ext_factory::ext(Self::factory_id())
-            .with_static_gas(FACTORY_VIEW_GAS)
-            .get_proxy_code_base58_hash()
+        Promise::new(Self::factory_id())
+            .function_call(
+                "get_proxy_code_base58_hash".to_string(),
+                vec![],
+                NearToken::from_near(0),
+                FACTORY_VIEW_GAS,
+            )
             .then(
                 Self::ext(env::current_account_id())
                     .with_static_gas(DO_UPGRADE_GAS)
@@ -199,9 +196,8 @@ impl TradingAccountContract {
             latest, expected_hash,
             "factory pointer does not match expected_hash"
         );
-        let hash: near_sdk::CryptoHash = Base58CryptoHash::try_from(latest.as_str())
-            .unwrap_or_else(|_| env::panic_str("invalid code hash"))
-            .into();
+        let hash = Base58CryptoHash::try_from(latest.as_str())
+            .unwrap_or_else(|_| env::panic_str("invalid code hash"));
 
         // One batch on this account: the code swap and migrate share a receipt, so a migrate
         // panic reverts the swap.
