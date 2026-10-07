@@ -1,15 +1,22 @@
 # Trading account
 
-The per-user contract, created by the [factory](factory.md) at `implicit_<24hex>.auth.peerfolio.near`. The owner moves in only the funds an agent may trade with. Authorized users can then have the MPC signer sign transactions from the trading account, limited to an allowlist. Method details are in the [reference](reference.md#trading-account).
+The per-user contract, created by the [factory](factory.md) at `implicit_<24hex>.auth.peerfolio.near`. The owner moves in only the funds an agent may trade with. Agents can then have the MPC signer sign transactions from the trading account, limited to an allowlist. Method details are in the [reference](reference.md#trading-account).
+
+## Glossary
+
+- **Owner**: the user's NEAR account that controls the trading account.
+- **Agent**: an account the owner allows to request signatures, usually Peerfolio's bot `bot.peerfolio.near`. A trading account can have at most 10.
+- **MPC signer**: the chain-signatures contract set by `signer_id`. It signs transactions for the trading account.
+- **Trading account**: this contract.
 
 ## Security model
 
 - The MPC key is derived from the trading account and a derivation path, so only the trading account contract can get signatures for it. The key has full access to the trading account.
 - The contract signs only one call: `mt_transfer` on `intents.near`, the allowlist in [`actions.rs`](../contracts/trading-account/src/actions.rs). Every other contract and method is rejected, and so are bare NEAR transfers.
-- **Arguments aren't checked.** An authorized user can `mt_transfer` any token the trading account holds on `intents.near` to any recipient. Only authorize accounts you trust with the trading account's funds.
+- **Arguments aren't checked.** An agent can `mt_transfer` any token the trading account holds on `intents.near` to any recipient. Only add agents you trust with the trading account's funds.
 - **Only the owner can change the MPC signer contract**, with `set_signer_id`. The trading account only returns a transaction whose signature recovers to the transaction's own MPC key.
-- **The owner isn't an authorized user** unless it adds itself, so it can't call `request_signature` by default.
-- **To cut off an agent at once**, remove it with `remove_authorized_user` and delete the MPC key with `delete_key`. Removing the agent alone leaves transactions it already had signed valid until they expire, about 24 hours later. Deleting the key also stops all signing until the owner adds it back with `add_full_access_key`. Adding it back doesn't revive transactions signed before the deletion, because the re-added key starts at a higher nonce.
+- **The owner isn't an agent** unless it adds itself, so it can't call `request_signature` by default.
+- **To cut off an agent at once**, remove it with `remove_agent` and delete the MPC key with `delete_key`. Removing the agent alone leaves transactions it already had signed valid until they expire, about 24 hours later. Deleting the key also stops all signing until the owner adds it back with `add_full_access_key`. Adding it back doesn't revive transactions signed before the deletion, because the re-added key starts at a higher nonce.
 - **The trading account never broadcasts anything.** It returns a signed transaction, and the caller broadcasts it. The transaction runs from the trading account, so gas and attached deposits come out of its balance.
 - The allowlist is compiled in. Changing it means [releasing new trading account code](releases.md#release-trading-account-code), and existing trading accounts keep their old code.
 
@@ -18,7 +25,7 @@ The per-user contract, created by the [factory](factory.md) at `implicit_<24hex>
 These commands use testnet and near-cli-rs (tested with 0.22). Variables:
 - `$OWNER`: a funded NEAR implicit account. To make one, run `near account create-account fund-later use-auto-generation save-to-folder <dir>` and send NEAR to the 64-hex ID it prints ([faucet](https://near-faucet.io/)).
 - `$OWNER_KEY`: the owner's key file, `<dir>/<id>.json`. Commands signed by the owner use `sign-with-access-key-file $OWNER_KEY`.
-- `$AGENT`: the authorized user. Peerfolio's mainnet agent is `bot.peerfolio.near`. There's no live testnet agent, so use any testnet account you control.
+- `$AGENT`: the agent. Peerfolio's mainnet agent is `bot.peerfolio.near`. There's no live testnet agent, so use any testnet account you control.
 - `$TA`: the trading account ID.
 
 1. **Create** the trading account. The owner must sign. Look up its name first:
@@ -38,7 +45,7 @@ These commands use testnet and near-cli-rs (tested with 0.22). Variables:
    near contract call-function as-transaction $TA add_full_access_key json-args '{"public_key":"<MPC key>"}' prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' sign-as $OWNER network-config testnet sign-with-access-key-file $OWNER_KEY send
    ```
    ```bash
-   near contract call-function as-transaction $TA add_authorized_user json-args "{\"account_id\":\"$AGENT\"}" prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' sign-as $OWNER network-config testnet sign-with-access-key-file $OWNER_KEY send
+   near contract call-function as-transaction $TA add_agent json-args "{\"account_id\":\"$AGENT\"}" prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' sign-as $OWNER network-config testnet sign-with-access-key-file $OWNER_KEY send
    ```
 4. **Fund it** with what the agent may trade. Keep some NEAR there at all times, because it pays gas for every signed transaction.
    ```bash

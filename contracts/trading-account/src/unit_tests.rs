@@ -17,12 +17,12 @@ fn owner() -> AccountId {
     accounts(1)
 }
 
-/// The authorized user in these tests.
+/// The agent in these tests.
 fn agent() -> AccountId {
     accounts(2)
 }
 
-/// Neither the owner nor an authorized user.
+/// Neither the owner nor an agent.
 fn stranger() -> AccountId {
     accounts(3)
 }
@@ -53,7 +53,7 @@ fn trading_account() -> TradingAccountContract {
 /// A trading account with `agent()` authorized.
 fn trading_account_with_agent() -> TradingAccountContract {
     let mut contract = trading_account();
-    contract.add_authorized_user(agent());
+    contract.add_agent(agent());
     contract
 }
 
@@ -93,64 +93,70 @@ fn test_new_sets_owner_and_signer() {
     let contract = trading_account();
     assert_eq!(contract.get_owner_id(), owner());
     assert_eq!(contract.get_signer_id().as_str(), "v1.signer");
-    assert!(contract.get_authorized_users().is_empty());
+    assert!(contract.get_agents().is_empty());
 }
 
 #[test]
-fn test_add_and_remove_authorized_user() {
+fn test_add_and_remove_agent() {
     let mut contract = trading_account();
 
-    contract.add_authorized_user(agent());
-    assert!(contract.is_authorized(agent()));
+    contract.add_agent(agent());
+    assert!(contract.is_agent(agent()));
 
-    contract.remove_authorized_user(agent());
-    assert!(!contract.is_authorized(agent()));
+    contract.remove_agent(agent());
+    assert!(!contract.is_agent(agent()));
+}
+
+#[test]
+fn test_is_agent_is_false_for_owner() {
+    let contract = trading_account();
+    assert!(!contract.is_agent(owner()));
 }
 
 #[test]
 #[should_panic(expected = "You have no power here. Only the owner can perform this action.")]
-fn test_add_authorized_user_rejects_non_owner() {
+fn test_add_agent_rejects_non_owner() {
     let mut contract = trading_account();
     call_as(agent());
-    contract.add_authorized_user(stranger());
+    contract.add_agent(stranger());
 }
 
 #[test]
-fn test_get_authorized_users() {
+fn test_get_agents() {
     let mut contract = trading_account();
-    contract.add_authorized_user(agent());
-    contract.add_authorized_user(stranger());
+    contract.add_agent(agent());
+    contract.add_agent(stranger());
 
-    let users = contract.get_authorized_users();
+    let users = contract.get_agents();
     assert_eq!(users.len(), 2);
     assert!(users.contains(&agent()));
     assert!(users.contains(&stranger()));
 }
 
 #[test]
-#[should_panic(expected = "Maximum number of authorized users reached:(10)")]
-fn test_add_authorized_user_rejects_more_than_max() {
+#[should_panic(expected = "Maximum number of agents reached:(10)")]
+fn test_add_agent_rejects_more_than_max() {
     let mut contract = trading_account();
     for i in 0..10 {
-        contract.add_authorized_user(user(i));
+        contract.add_agent(user(i));
     }
-    contract.add_authorized_user(user(11));
+    contract.add_agent(user(11));
 }
 
 #[test]
-fn test_remove_authorized_user_frees_a_slot() {
+fn test_remove_agent_frees_a_slot() {
     let mut contract = trading_account();
     for i in 0..10 {
-        contract.add_authorized_user(user(i));
+        contract.add_agent(user(i));
     }
-    assert_eq!(contract.get_authorized_users().len(), 10);
+    assert_eq!(contract.get_agents().len(), 10);
 
-    contract.remove_authorized_user(user(0));
-    assert_eq!(contract.get_authorized_users().len(), 9);
+    contract.remove_agent(user(0));
+    assert_eq!(contract.get_agents().len(), 9);
 
-    contract.add_authorized_user(user(11));
-    assert_eq!(contract.get_authorized_users().len(), 10);
-    assert!(contract.is_authorized(user(11)));
+    contract.add_agent(user(11));
+    assert_eq!(contract.get_agents().len(), 10);
+    assert!(contract.is_agent(user(11)));
 }
 
 #[test]
@@ -164,7 +170,7 @@ fn test_set_signer_id_by_owner() {
 // it could have anything signed (pen test finding #7, ft-core#1696).
 #[test]
 #[should_panic(expected = "You have no power here. Only the owner can perform this action.")]
-fn test_set_signer_id_rejects_authorized_user() {
+fn test_set_signer_id_rejects_agent() {
     let mut contract = trading_account_with_agent();
     call_as(agent());
     contract.set_signer_id("new-signer.near".parse().unwrap());
@@ -287,7 +293,7 @@ fn test_delete_key_by_owner() {
 // (pen test findings #5 and #6, ft-core#1791), and only the owner may do it.
 #[test]
 #[should_panic(expected = "You have no power here. Only the owner can perform this action.")]
-fn test_delete_key_rejects_authorized_user() {
+fn test_delete_key_rejects_agent() {
     let mut contract = trading_account_with_agent();
     let _ = delete_key_as(&mut contract, agent(), 1);
 }
@@ -315,16 +321,16 @@ fn test_delete_key_rejects_more_than_one_yocto() {
 }
 
 #[test]
-#[should_panic(expected = "Unauthorized: only authorized users can request signatures")]
+#[should_panic(expected = "Unauthorized: only agents can request signatures")]
 fn test_request_signature_rejects_unauthorized_caller() {
     let mut contract = trading_account();
     let _ = request_signature(&mut contract, stranger(), "intents.near", MT_TRANSFER);
 }
 
-// Only authorized users (the bot) can request signatures, not the owner. That's deliberate: the
+// Only agents (the bot) can request signatures, not the owner. That's deliberate: the
 // owner has no use for signing through the trading account, so it doesn't get the capability.
 #[test]
-#[should_panic(expected = "Unauthorized: only authorized users can request signatures")]
+#[should_panic(expected = "Unauthorized: only agents can request signatures")]
 fn test_request_signature_rejects_owner() {
     let mut contract = trading_account_with_agent();
     let _ = request_signature(
