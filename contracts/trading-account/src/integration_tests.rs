@@ -300,7 +300,8 @@ async fn broadcast(worker: &Worker<Sandbox>, signed_tx_base64: &str) -> Result<s
 // until it expires, about a day later, unless the MPC key is deleted. Two transactions are signed
 // up front. The first is the control: broadcasting it works while the key exists. After the owner
 // deletes the key, broadcasting the second fails with an unknown-key error, and adding the key
-// back doesn't revive it.
+// back doesn't revive it. The second has the highest nonce the contract will sign, so no
+// transaction it signed before the deletion can be revived.
 #[tokio::test]
 async fn test_delete_key_invalidates_signed_transactions() -> Result<()> {
     let worker = near_workspaces::sandbox().await?;
@@ -316,7 +317,8 @@ async fn test_delete_key_invalidates_signed_transactions() -> Result<()> {
         .view_access_key(trading_account.id(), &mpc_key.parse()?)
         .await?
         .nonce;
-    let block_hash = worker.view_block().await?.hash().0;
+    let block = worker.view_block().await?;
+    let block_hash = block.hash().0;
 
     let actions_json = r#"[{"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"alice.near","token_id":"nep141:wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"}]"#;
     let (control, _) = request_signature_with_stub(
@@ -333,7 +335,8 @@ async fn test_delete_key_invalidates_signed_transactions() -> Result<()> {
         &signer,
         &agent,
         actions_json,
-        nonce + 2,
+        // The highest nonce the contract signs at this height.
+        block.height() * 1_000_000 - 1,
         block_hash,
     )
     .await?;
@@ -370,5 +373,36 @@ async fn test_delete_key_invalidates_signed_transactions() -> Result<()> {
         "{}",
         response
     );
+    Ok(())
+}
+
+// A nonce for a future block height would make a transaction that becomes valid later, after the
+// owner has deleted and re-added the MPC key. The contract refuses to sign it.
+#[tokio::test]
+async fn test_request_signature_rejects_nonce_from_a_future_block() -> Result<()> {
+    use near_sdk::json_types::Base58CryptoHash;
+
+    let worker = near_workspaces::sandbox().await?;
+    let (trading_account, _signer, agent) = deploy_with_stub_signer(&worker).await?;
+    let block = worker.view_block().await?;
+
+    let outcome = agent
+        .call(trading_account.id(), "request_signature")
+        .args_json(json!({
+            "contract_id": "intents.near",
+            "actions_json": r#"[{"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"alice.near","token_id":"nep141:wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"}]"#,
+            "nonce": ((block.height() + 30) * 1_000_000).to_string(),
+            "block_hash": Base58CryptoHash::from(block.hash().0),
+            "mpc_signer_pk": test_support::mpc_public_key(),
+            "derivation_path": trading_account.id(),
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+
+    assert!(outcome.is_failure());
+    let failures = format!("{:?}", outcome.failures());
+    assert!(failures.contains("Invalid nonce"), "{}", failures);
     Ok(())
 }

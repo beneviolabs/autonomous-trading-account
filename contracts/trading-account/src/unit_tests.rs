@@ -31,11 +31,15 @@ fn user(i: usize) -> AccountId {
     format!("user{}.testnet", i).parse().unwrap()
 }
 
+/// The block height the mocked chain is at.
+const BLOCK_HEIGHT: u64 = 100;
+
 fn get_context(predecessor: AccountId) -> VMContextBuilder {
     let mut builder = VMContextBuilder::new();
     builder
         .predecessor_account_id(predecessor)
-        .prepaid_gas(Gas::from_tgas(150));
+        .prepaid_gas(Gas::from_tgas(150))
+        .block_height(BLOCK_HEIGHT);
     builder
 }
 
@@ -64,11 +68,21 @@ fn request_signature(
     contract_id: &str,
     actions_json: &str,
 ) -> Promise {
+    request_signature_with_nonce(contract, caller, contract_id, actions_json, 1)
+}
+
+fn request_signature_with_nonce(
+    contract: &mut TradingAccountContract,
+    caller: AccountId,
+    contract_id: &str,
+    actions_json: &str,
+    nonce: u64,
+) -> Promise {
     call_as(caller);
     contract.request_signature(
         contract_id.parse().unwrap(),
         actions_json.to_string(),
-        U64(1),
+        U64(nonce),
         Base58CryptoHash::from([0u8; 32]),
         test_support::mpc_public_key(),
         "trading-account.near".to_string(),
@@ -390,6 +404,38 @@ fn test_request_signature_rejects_transfer() {
 fn test_request_signature_accepts_mt_transfer() {
     let mut contract = trading_account_with_agent();
     let _ = request_signature(&mut contract, agent(), "intents.near", MT_TRANSFER);
+}
+
+// NEAR only accepts a nonce below the block height × 1,000,000, and a re-added key starts at
+// (its block height - 1) × 1,000,000. A higher nonce would make a transaction that becomes valid
+// later, and could outlive delete_key + add_full_access_key. Signing only nonces below the
+// current block height × 1,000,000 keeps every signed transaction below a re-added key's nonce.
+#[test]
+#[should_panic(expected = "Invalid nonce")]
+fn test_request_signature_rejects_nonce_from_a_future_block() {
+    let mut contract = trading_account_with_agent();
+    let _ = request_signature_with_nonce(
+        &mut contract,
+        agent(),
+        "intents.near",
+        MT_TRANSFER,
+        BLOCK_HEIGHT * 1_000_000,
+    );
+}
+
+// The highest nonce that's valid now passes the check, and fails later on the mocked chain's
+// GasExceeded, as in test_request_signature_accepts_mt_transfer.
+#[test]
+#[should_panic(expected = "GasExceeded")]
+fn test_request_signature_accepts_highest_valid_nonce() {
+    let mut contract = trading_account_with_agent();
+    let _ = request_signature_with_nonce(
+        &mut contract,
+        agent(),
+        "intents.near",
+        MT_TRANSFER,
+        BLOCK_HEIGHT * 1_000_000 - 1,
+    );
 }
 
 // FunctionCall is the only action type, and the allowlist only checks FunctionCalls, so every
