@@ -38,10 +38,10 @@ Attach at least 100 Tgas (300 recommended) and 1 yoctoNEAR, which is forwarded t
 |---|---|
 | `contract_id` | Receiver of the signed transaction. Must be `intents.near`. |
 | `actions_json` | A JSON **string** holding a non-empty array of `mt_transfer` calls, e.g. `[{"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"alice.near","token_id":"nep141:wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"}]`. `gas` and `deposit` are strings. |
-| `nonce` | Greater than the MPC key's current nonce on the trading account, and unique per pending transaction. |
+| `nonce` | Greater than the MPC key's current nonce on the trading account, and unique per pending transaction. It must also be below the current block height × 1,000,000, NEAR's own limit for a transaction that's valid now. |
 | `block_hash` | A recent block hash. The transaction expires about 24h later. |
 | `mpc_signer_pk` | The MPC key, `secp256k1:…`. The transaction is signed for this key, and the callback rejects a signature that doesn't recover to it. |
-| `derivation_path` | The path used to derive `mpc_signer_pk`. By convention, the trading account ID. |
+| `derivation_path` | The path the MPC key on the trading account was derived with. Peerfolio uses the agent's account ID, e.g. `bot.peerfolio.near`. |
 
 It returns a base64 borsh `SignedTransaction` from the trading account, also logged as `Signed transaction (base64): …`. The caller must broadcast it. Gas and attached deposits come out of the trading account's balance.
 
@@ -51,6 +51,7 @@ Common failures:
 |---|---|
 | `Failed to deserialize input from JSON … invalid character '<'` | A `<placeholder>` from the docs was left in the arguments. |
 | `Unauthorized: only agents can request signatures` | The caller isn't an agent. |
+| `Invalid nonce: must be below the current block height × 1000000` | The nonce is for a future block. Use the MPC key's current nonce + 1. |
 | `<method> on <contract> is not allowed` | The call isn't `mt_transfer` on `intents.near`, the only one the allowlist permits. |
 | `unknown variant` | An action other than `FunctionCall`, such as a bare `Transfer`. |
 | `Invalid signature: recovered key doesn't match the transaction's public key` | `mpc_signer_pk` isn't the key derived from `derivation_path`, or the signer contract signed with another key. |

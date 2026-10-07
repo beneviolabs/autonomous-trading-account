@@ -39,6 +39,8 @@ const BASE_GAS: Gas = Gas::from_tgas(10); // Base gas for contract execution
 const CALLBACK_GAS: Gas = Gas::from_tgas(10); // Gas reserved for callback
 const NEAR_MPC_DOMAIN_ID: u32 = 0;
 const MAX_AGENTS: u64 = 10; // Maximum number of agents per trading account
+// NEAR accepts a transaction nonce only below block height * this multiplier (nearcore's name).
+const ACCESS_KEY_NONCE_RANGE_MULTIPLIER: u64 = 1_000_000;
 const NEAR_INTENTS_ADDRESS: &AccountIdRef = AccountIdRef::new_or_panic("intents.near");
 
 #[near(contract_state)]
@@ -202,6 +204,14 @@ impl TradingAccountContract {
         assert!(
             self.agents.contains(&env::predecessor_account_id()),
             "Unauthorized: only agents can request signatures"
+        );
+
+        // A nonce for a future block makes a transaction that only becomes valid later, so it could
+        // outlive delete_key plus re-adding the key. A re-added key starts above this limit.
+        assert!(
+            nonce.0 < env::block_height() * ACCESS_KEY_NONCE_RANGE_MULTIPLIER,
+            "Invalid nonce: must be below the current block height × {}",
+            ACCESS_KEY_NONCE_RANGE_MULTIPLIER
         );
 
         // Parse actions from JSON string
