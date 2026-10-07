@@ -1028,3 +1028,146 @@ fn test_migrate_without_state_panics() {
     call_as(owner());
     let _ = TradingAccountContract::migrate();
 }
+
+// ---- upgrade and do_upgrade ----
+
+/// The factory's current code hash in these tests.
+const LATEST_HASH: &str = "6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f";
+
+/// A trading account created by the auth.peerfolio.near factory.
+fn factory_created_account_id() -> AccountId {
+    "a1b2.auth.peerfolio.near".parse().unwrap()
+}
+
+/// Makes `caller` the predecessor of the next call on `factory_created_account_id()`, attaching
+/// `deposit` yoctoNEAR.
+fn call_on_factory_created_account(caller: AccountId, deposit: u128) {
+    let mut context = get_context(caller);
+    context
+        .current_account_id(factory_created_account_id())
+        .attached_deposit(NearToken::from_yoctonear(deposit));
+    testing_env!(context.build());
+}
+
+fn upgrade_as(caller: AccountId, deposit: u128) -> Promise {
+    let mut contract = trading_account_with_agent();
+    call_on_factory_created_account(caller, deposit);
+    contract.upgrade(LATEST_HASH.to_string())
+}
+
+fn do_upgrade(expected_hash: &str, latest: &str) -> Promise {
+    let contract = trading_account();
+    let account = factory_created_account_id();
+    call_on_factory_created_account(account, 0);
+    contract.do_upgrade(expected_hash.to_string(), latest.to_string())
+}
+
+#[test]
+fn test_upgrade_asks_its_factory_then_calls_do_upgrade() {
+    let receipts = receipts_of(upgrade_as(owner(), 1));
+
+    assert_eq!(receipts.len(), 2);
+    // The factory is the account's parent, never a caller-supplied account.
+    assert_eq!(receipts[0].receiver_id.as_str(), "auth.peerfolio.near");
+    let [
+        MockAction::FunctionCallWeight {
+            method_name,
+            attached_deposit,
+            ..
+        },
+    ] = &receipts[0].actions[..]
+    else {
+        panic!("unexpected actions: {:?}", receipts[0].actions);
+    };
+    assert_eq!(method_name, b"get_proxy_code_base58_hash");
+    assert_eq!(*attached_deposit, NearToken::from_yoctonear(0));
+
+    assert_eq!(receipts[1].receiver_id, factory_created_account_id());
+    assert_eq!(
+        receipts[1].receipt_indices,
+        vec![0],
+        "runs after the factory view"
+    );
+    let [
+        MockAction::FunctionCallWeight {
+            method_name,
+            args,
+            attached_deposit,
+            prepaid_gas,
+            ..
+        },
+    ] = &receipts[1].actions[..]
+    else {
+        panic!("unexpected actions: {:?}", receipts[1].actions);
+    };
+    assert_eq!(method_name, b"do_upgrade");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(args).unwrap(),
+        serde_json::json!({ "expected_hash": LATEST_HASH })
+    );
+    assert_eq!(*attached_deposit, NearToken::from_yoctonear(0));
+    // do_upgrade must have enough gas left to hand migrate its budget.
+    assert!(*prepaid_gas > crate::MIGRATE_GAS, "{:?}", prepaid_gas);
+}
+
+// One yoctoNEAR means the owner signed with a full-access key, not a function-call key.
+#[test]
+#[should_panic(expected = "Requires attached deposit of exactly 1 yoctoNEAR")]
+fn test_upgrade_requires_one_yocto() {
+    let _ = upgrade_as(owner(), 0);
+}
+
+#[test]
+#[should_panic(expected = "You have no power here. Only the owner can perform this action.")]
+fn test_upgrade_rejects_an_agent() {
+    let _ = upgrade_as(agent(), 1);
+}
+
+#[test]
+#[should_panic(expected = "You have no power here. Only the owner can perform this action.")]
+fn test_upgrade_rejects_a_stranger() {
+    let _ = upgrade_as(stranger(), 1);
+}
+
+#[test]
+fn test_do_upgrade_switches_code_then_migrates_in_one_receipt() {
+    let receipts = receipts_of(do_upgrade(LATEST_HASH, LATEST_HASH));
+
+    assert_eq!(receipts.len(), 1);
+    assert_eq!(receipts[0].receiver_id, factory_created_account_id());
+    let [
+        use_global_contract,
+        MockAction::FunctionCallWeight {
+            method_name,
+            args,
+            attached_deposit,
+            prepaid_gas,
+            ..
+        },
+    ] = &receipts[0].actions[..]
+    else {
+        panic!("unexpected actions: {:?}", receipts[0].actions);
+    };
+    assert_eq!(
+        serde_json::to_value(use_global_contract).unwrap()["UseGlobalContract"]["contract_id"],
+        serde_json::json!({ "hash": LATEST_HASH })
+    );
+    assert_eq!(method_name, b"migrate");
+    assert!(args.is_empty());
+    assert_eq!(*attached_deposit, NearToken::from_yoctonear(0));
+    assert_eq!(*prepaid_gas, crate::MIGRATE_GAS);
+}
+
+// The signed expected_hash and the factory's pointer must agree, so moving either one alone
+// can't redirect an upgrade.
+#[test]
+#[should_panic(expected = "factory pointer does not match expected_hash")]
+fn test_do_upgrade_rejects_a_hash_the_factory_does_not_point_to() {
+    let _ = do_upgrade("11111111111111111111111111111111", LATEST_HASH);
+}
+
+#[test]
+#[should_panic(expected = "invalid code hash")]
+fn test_do_upgrade_rejects_an_invalid_hash() {
+    let _ = do_upgrade("not-a-hash", "not-a-hash");
+}
