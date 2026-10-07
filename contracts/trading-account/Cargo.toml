@@ -31,7 +31,6 @@ sha2 = "0.10.8"
 serde_json = "1.0"
 hex = "0.4.3"
 schemars = "0.8.22"
-bs58 = "0.5.1"
 
 
 [dev-dependencies]
@@ -47,3 +46,5 @@ wat = "1"
 # Broadcasts signed transactions to the sandbox in integration_tests.rs. The version
 # near-workspaces already uses; no TLS needed for the local RPC.
 reqwest = { version = "0.12", default-features = false }
+# Formats the test MPC key in test_support.rs.
+bs58 = "0.5.1"

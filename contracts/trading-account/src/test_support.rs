@@ -50,8 +50,16 @@ pub fn unsigned_tx(
 
 /// What the MPC signer returns for `tx`, and the signed transaction the callback should build.
 pub fn mpc_sign(tx: &NearTransaction) -> (EcdsaSignatureResponse, Vec<u8>) {
+    mpc_sign_with(tx, TEST_MPC_SECRET_KEY)
+}
+
+/// `mpc_sign`, but signed with `secret_key` instead of the test MPC key.
+pub fn mpc_sign_with(
+    tx: &NearTransaction,
+    secret_key: [u8; 32],
+) -> (EcdsaSignatureResponse, Vec<u8>) {
     let hash = crate::utils::hash_payload(&tx.build_for_signing());
-    let secret = SecretKey::from_slice(&TEST_MPC_SECRET_KEY).unwrap();
+    let secret = SecretKey::from_slice(&secret_key).unwrap();
     let (recovery_id, rs) = Secp256k1::new()
         .sign_ecdsa_recoverable(&Message::from_slice(&hash).unwrap(), &secret)
         .serialize_compact();

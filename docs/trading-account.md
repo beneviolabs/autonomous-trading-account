@@ -7,7 +7,7 @@ The per-user contract, created by the [factory](factory.md) at `implicit_<24hex>
 - The MPC key is derived from the trading account and a derivation path, so only the trading account contract can get signatures for it. The key has full access to the trading account.
 - The contract signs only one call: `mt_transfer` on `intents.near`, the allowlist in [`actions.rs`](../contracts/trading-account/src/actions.rs). Every other contract and method is rejected, and so are bare NEAR transfers.
 - **Arguments aren't checked.** An authorized user can `mt_transfer` any token the trading account holds on `intents.near` to any recipient. Only authorize accounts you trust with the trading account's funds.
-- An authorized user can also change the MPC signer contract with `set_signer_id`.
+- **Only the owner can change the MPC signer contract**, with `set_signer_id`. The trading account only returns a transaction whose signature recovers to the transaction's own MPC key.
 - **The owner isn't an authorized user** unless it adds itself, so it can't call `request_signature` by default.
 - **To cut off an agent at once**, remove it with `remove_authorized_user` and delete the MPC key with `delete_key`. Removing the agent alone leaves transactions it already had signed valid until they expire, about 24 hours later. Deleting the key also stops all signing until the owner adds it back with `add_full_access_key`. Adding it back doesn't revive transactions signed before the deletion, because the re-added key starts at a higher nonce.
 - **The trading account never broadcasts anything.** It returns a signed transaction, and the caller broadcasts it. The transaction runs from the trading account, so gas and attached deposits come out of its balance.
