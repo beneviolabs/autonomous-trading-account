@@ -9,7 +9,7 @@ NEAR smart contracts that give an AI agent **limited, revocable** authority to t
 owner ──create──▶ factory ──creates──▶ trading account
 agent ──request_signature──▶ trading account ──sign──▶ MPC signer
 agent ◀── signed transaction ──┘
-agent ──broadcast──▶ NEAR ──▶ wrap.near / intents.near (sent from the trading account)
+agent ──broadcast──▶ NEAR ──▶ intents.near mt_transfer (sent from the trading account)
 ```
 
 ## Deployments
