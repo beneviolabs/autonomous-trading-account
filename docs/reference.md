@@ -36,8 +36,8 @@ Attach at least 100 Tgas (300 recommended) and 1 yoctoNEAR, which is forwarded t
 
 | Argument | Notes |
 |---|---|
-| `contract_id` | Receiver of the signed transaction. Must be allowlisted. |
-| `actions_json` | A JSON **string** holding a non-empty array, e.g. `[{"type":"FunctionCall","method_name":"near_deposit","args":{},"gas":"30000000000000","deposit":"50000000000000000000000"}]`. `gas` and `deposit` are strings. `{"type":"Transfer","deposit":"1"}` is only accepted alongside a `FunctionCall`. |
+| `contract_id` | Receiver of the signed transaction. Must be `intents.near`. |
+| `actions_json` | A JSON **string** holding a non-empty array of `mt_transfer` calls, e.g. `[{"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"alice.near","token_id":"nep141:wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"}]`. `gas` and `deposit` are strings. |
 | `nonce` | Greater than the MPC key's current nonce on the trading account, and unique per pending transaction. |
 | `block_hash` | A recent block hash. The transaction expires about 24h later. |
 | `mpc_signer_pk` | The MPC key, `secp256k1:…`. It isn't checked against the derivation path. |
@@ -52,7 +52,8 @@ Common failures:
 |---|---|
 | `Failed to deserialize input from JSON … invalid character '<'` | A `<placeholder>` from the docs was left in the arguments. |
 | `Unauthorized: only authorized users can request signatures` | The caller isn't an authorized user. |
-| `… is not allowed` / `Method … is restricted` | The receiver or method isn't allowlisted. |
+| `<method> on <contract> is not allowed` | The call isn't `mt_transfer` on `intents.near`, the only one the allowlist permits. |
+| `unknown variant` | An action other than `FunctionCall`, such as a bare `Transfer`. |
 | Broadcast rejected: invalid signature | `mpc_signer_pk` doesn't match `derivation_path`, or the key isn't on the trading account. |
 | Broadcast rejected: invalid nonce | The nonce was already used. Request again with a higher one. |
 | Broadcast rejected: not enough balance | The trading account can't cover gas or the attached deposit. |

@@ -101,8 +101,8 @@ async fn test_request_signature_rejects_unauthorized_caller() -> Result<()> {
     let outcome = stranger
         .call(trading_account.id(), "request_signature")
         .args_json(json!({
-            "contract_id": "wrap.testnet",
-            "actions_json": r#"[{"type":"FunctionCall","method_name":"near_deposit","args":{},"gas":"30000000000000","deposit":"1"}]"#,
+            "contract_id": "intents.near",
+            "actions_json": r#"[{"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"alice.near","token_id":"nep141:wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"}]"#,
             "nonce": "1",
             "block_hash": "11111111111111111111111111111111",
             "mpc_signer_pk": test_support::mpc_public_key(),

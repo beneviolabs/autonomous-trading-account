@@ -10,6 +10,9 @@ use omni_transaction::near::utils::PublicKeyStrExt;
 
 const PUBLIC_KEY: &str = "ed25519:11111111111111111111111111111111";
 
+/// One `mt_transfer` on `intents.near`, the only call the allowlist permits.
+const MT_TRANSFER: &str = r#"[{"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"alice.near","token_id":"nep141:wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"}]"#;
+
 fn owner() -> AccountId {
     accounts(1)
 }
@@ -313,51 +316,47 @@ fn test_delete_key_rejects_more_than_one_yocto() {
 #[should_panic(expected = "Unauthorized: only authorized users can request signatures")]
 fn test_request_signature_rejects_unauthorized_caller() {
     let mut contract = trading_account();
-    let _ = request_signature(
-        &mut contract,
-        stranger(),
-        "wrap.near",
-        r#"[{"type":"FunctionCall","method_name":"near_deposit","args":{},"gas":"30000000000000","deposit":"1"}]"#,
-    );
+    let _ = request_signature(&mut contract, stranger(), "intents.near", MT_TRANSFER);
 }
 
 #[test]
-#[should_panic(expected = "unknown variant `Sign Message`, expected `FunctionCall` or `Transfer`")]
+#[should_panic(expected = "unknown variant `Sign Message`, expected `FunctionCall`")]
 fn test_request_signature_rejects_unknown_action_type() {
     let mut contract = trading_account_with_agent();
     let _ = request_signature(
         &mut contract,
         agent(),
-        "wrap.near",
+        "intents.near",
         r#"[{"type":"Sign Message","Message":"blah blah blah"}]"#,
     );
 }
 
 #[test]
-#[should_panic(
-    expected = "Transfer actions must be accompanied by at least one FunctionCall action"
-)]
-fn test_request_signature_rejects_lone_transfer() {
+#[should_panic(expected = "ft_withdraw on intents.near is not allowed")]
+fn test_request_signature_rejects_disallowed_call() {
     let mut contract = trading_account_with_agent();
     let _ = request_signature(
         &mut contract,
         agent(),
-        "bad-account.near",
-        r#"[{"type":"Transfer","deposit":"1000000000000000000000000"}]"#,
+        "intents.near",
+        r#"[{"type":"FunctionCall","method_name":"ft_withdraw","args":{"receiver_id":"alice.near","token":"wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"}]"#,
     );
 }
 
+// A bare Transfer sends NEAR straight out of the trading account. The bot never needs one, so
+// it's rejected even next to an allowed call (pen test finding #2, ft-core#1792).
 #[test]
-#[should_panic(
-    expected = "Transfer actions must be accompanied by at least one FunctionCall action"
-)]
-fn test_request_signature_rejects_transfers_without_function_call() {
+#[should_panic(expected = "unknown variant `Transfer`, expected `FunctionCall`")]
+fn test_request_signature_rejects_transfer() {
     let mut contract = trading_account_with_agent();
     let _ = request_signature(
         &mut contract,
         agent(),
-        "wrap.near",
-        r#"[{"type":"Transfer","deposit":"1000000000000000000000000"},{"type":"Transfer","deposit":"2000000000000000000000000"}]"#,
+        "intents.near",
+        r#"[
+            {"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"alice.near","token_id":"nep141:wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"},
+            {"type":"Transfer","deposit":"1000000000000000000000000"}
+        ]"#,
     );
 }
 
@@ -367,75 +366,123 @@ fn test_request_signature_rejects_transfers_without_function_call() {
 // runs a whole call in the sandbox.
 #[test]
 #[should_panic(expected = "GasExceeded")]
-fn test_request_signature_accepts_transfer_with_function_call() {
+fn test_request_signature_accepts_mt_transfer() {
     let mut contract = trading_account_with_agent();
-    let _ = request_signature(
-        &mut contract,
-        agent(),
-        "wrap.near",
-        r#"[
-            {"type":"FunctionCall","method_name":"ft_transfer_call","args":{"receiver_id":"alice.near","amount":"1000000000000000000000000"},"gas":"100000000000000","deposit":"1000000000000000000000000"},
-            {"type":"Transfer","deposit":"1000000000000000000000000"}
-        ]"#,
+    let _ = request_signature(&mut contract, agent(), "intents.near", MT_TRANSFER);
+}
+
+// FunctionCall is the only action type, and the allowlist only checks FunctionCalls, so every
+// other action type must fail to parse. If one were added, serde would list it after
+// `FunctionCall` and this would fail.
+#[test]
+fn test_action_string_accepts_only_function_call() {
+    for action_type in [
+        "Transfer",
+        "AddKey",
+        "DeleteKey",
+        "DeleteAccount",
+        "DeployContract",
+        "Stake",
+        "CreateAccount",
+        "functioncall",
+    ] {
+        let error = serde_json::from_str::<Vec<ActionString>>(&format!(
+            r#"[{{"type":"{}"}}]"#,
+            action_type
+        ))
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains(&format!(
+                "unknown variant `{}`, expected `FunctionCall` at",
+                action_type
+            )),
+            "{}",
+            error
+        );
+    }
+}
+
+#[test]
+fn test_validate_and_build_actions_builds_mt_transfer() {
+    let actions = build_actions("intents.near", MT_TRANSFER).unwrap();
+
+    let [OmniAction::FunctionCall(call)] = &actions[..] else {
+        panic!("unexpected actions: {:?}", actions);
+    };
+    assert_eq!(call.method_name, "mt_transfer");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&call.args).unwrap(),
+        serde_json::json!({"receiver_id": "alice.near", "token_id": "nep141:wrap.near", "amount": "1000"})
     );
+    assert_eq!(call.gas, Gas::from_tgas(30));
+    assert_eq!(call.deposit, NearToken::from_yoctonear(1));
 }
 
+// The bot only ever signs intents.near::mt_transfer (pen test finding #2, ft-core#1792). Everything
+// the allowlist used to permit is rejected, and so are names one typo or suffix away from it.
 #[test]
-fn test_validate_and_build_actions_accepts_function_call() {
-    let actions = build_actions(
-        "wrap.near",
-        r#"[{"type":"FunctionCall","method_name":"ft_transfer_call","args":{"receiver_id":"alice.near","amount":"1000000000000000000000000"},"gas":"100000000000000","deposit":"1000000000000000000000000"}]"#,
-    )
-    .unwrap();
-    assert_eq!(actions.len(), 1);
+fn test_validate_and_build_actions_rejects_everything_but_mt_transfer_on_intents() {
+    const PREVIOUSLY_ALLOWED_CONTRACTS: [&str; 3] = ["wrap.near", "intents.near", "wrap.testnet"];
+    const PREVIOUSLY_ALLOWED_METHODS: [&str; 6] = [
+        "add_public_key",
+        "ft_transfer_call",
+        "near_deposit",
+        "mt_transfer_call",
+        "mt_transfer",
+        "ft_withdraw",
+    ];
+    let mut calls: Vec<(&str, &str)> = PREVIOUSLY_ALLOWED_CONTRACTS
+        .iter()
+        .flat_map(|contract| {
+            PREVIOUSLY_ALLOWED_METHODS
+                .iter()
+                .map(move |method| (*contract, *method))
+        })
+        .filter(|call| *call != ("intents.near", "mt_transfer"))
+        .collect();
+    assert_eq!(calls.len(), 17);
+    calls.extend([
+        ("attacker.intents.near", "mt_transfer"),
+        ("intents.near.attacker.near", "mt_transfer"),
+        ("xintents.near", "mt_transfer"),
+        ("intents.testnet", "mt_transfer"),
+        ("intents.near", "MT_TRANSFER"),
+        ("intents.near", "mt_transfer "),
+        ("intents.near", "mt-transfer"),
+    ]);
+
+    for (contract, method) in calls {
+        let actions_json = serde_json::json!([{
+            "type": "FunctionCall",
+            "method_name": method,
+            "args": {},
+            "gas": "30000000000000",
+            "deposit": "1",
+        }])
+        .to_string();
+        let error = build_actions(contract, &actions_json).unwrap_err();
+        assert!(
+            error.contains(&format!("{} on {} is not allowed", method, contract)),
+            "{}",
+            error
+        );
+    }
 }
 
+// One disallowed call fails the whole request, not just that action.
 #[test]
-fn test_validate_and_build_actions_accepts_transfer_with_function_call() {
-    let actions = build_actions(
-        "wrap.near",
-        r#"[
-            {"type":"Transfer","deposit":"500000000000000000000000"},
-            {"type":"FunctionCall","method_name":"ft_transfer_call","args":{"receiver_id":"alice.near","amount":"1000000000000000000000000"},"gas":"100000000000000","deposit":"1000000000000000000000000"}
-        ]"#,
-    )
-    .unwrap();
-    assert_eq!(actions.len(), 2);
-}
-
-#[test]
-fn test_validate_and_build_actions_accepts_multiple_actions() {
-    let actions = build_actions(
-        "wrap.near",
-        r#"[
-            {"type":"FunctionCall","method_name":"ft_transfer_call","args":{"receiver_id":"alice.near"},"gas":"100000000000000","deposit":"1000000000000000000000000"},
-            {"type":"Transfer","deposit":"500000000000000000000000"},
-            {"type":"FunctionCall","method_name":"near_deposit","args":{},"gas":"50000000000000","deposit":"0"}
-        ]"#,
-    )
-    .unwrap();
-    assert_eq!(actions.len(), 3);
-}
-
-#[test]
-fn test_validate_and_build_actions_rejects_contract_outside_allowlist() {
+fn test_validate_and_build_actions_rejects_batch_with_one_disallowed_call() {
     let error = build_actions(
-        "disallowed.near",
-        r#"[{"type":"FunctionCall","method_name":"ft_transfer_call","args":{},"gas":"100000000000000","deposit":"1000000000000000000000000"}]"#,
-    )
-    .unwrap_err();
-    assert!(error.contains("is not allowed"), "{}", error);
-}
-
-#[test]
-fn test_validate_and_build_actions_rejects_method_outside_allowlist() {
-    let error = build_actions(
-        "wrap.near",
-        r#"[{"type":"FunctionCall","method_name":"disallowed_method","args":{},"gas":"100000000000000","deposit":"1000000000000000000000000"}]"#,
+        "intents.near",
+        r#"[
+            {"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"alice.near","token_id":"nep141:wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"},
+            {"type":"FunctionCall","method_name":"ft_withdraw","args":{"receiver_id":"alice.near","token":"wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"}
+        ]"#,
     )
     .unwrap_err();
     assert!(
-        error.contains("Method disallowed_method is restricted"),
+        error.contains("ft_withdraw on intents.near is not allowed"),
         "{}",
         error
     );
@@ -444,8 +491,8 @@ fn test_validate_and_build_actions_rejects_method_outside_allowlist() {
 #[test]
 fn test_validate_and_build_actions_rejects_invalid_gas() {
     let error = build_actions(
-        "wrap.near",
-        r#"[{"type":"FunctionCall","method_name":"ft_transfer_call","args":{},"gas":"invalid_gas","deposit":"1000000000000000000000000"}]"#,
+        "intents.near",
+        r#"[{"type":"FunctionCall","method_name":"mt_transfer","args":{},"gas":"invalid_gas","deposit":"1"}]"#,
     )
     .unwrap_err();
     assert!(error.contains("Invalid gas format"), "{}", error);
@@ -454,8 +501,8 @@ fn test_validate_and_build_actions_rejects_invalid_gas() {
 #[test]
 fn test_validate_and_build_actions_rejects_invalid_deposit() {
     let error = build_actions(
-        "wrap.near",
-        r#"[{"type":"FunctionCall","method_name":"ft_transfer_call","args":{},"gas":"100000000000000","deposit":"invalid_deposit"}]"#,
+        "intents.near",
+        r#"[{"type":"FunctionCall","method_name":"mt_transfer","args":{},"gas":"30000000000000","deposit":"invalid_deposit"}]"#,
     )
     .unwrap_err();
     assert!(error.contains("Invalid deposit format"), "{}", error);
@@ -463,7 +510,7 @@ fn test_validate_and_build_actions_rejects_invalid_deposit() {
 
 #[test]
 fn test_validate_and_build_actions_rejects_empty_actions() {
-    let error = build_actions("wrap.near", "[]").unwrap_err();
+    let error = build_actions("intents.near", "[]").unwrap_err();
     assert!(error.contains("Actions cannot be empty"), "{}", error);
 }
 
@@ -516,10 +563,13 @@ fn test_create_signature_request_defaults_domain_id_to_zero() {
 // omni-transaction and passes it to sign_request_callback as JSON, which deserializes it back
 // into the same type. The expected values were produced by the audited version
 // (omni-transaction 0.2, near-sdk 5.17), so a dependency bump that changes the encoding or
-// breaks the JSON round trip fails here.
+// breaks the JSON round trip fails here. Its actions are built directly: the allowlist no longer
+// permits them, but the encoding they pin is the same for mt_transfer.
 #[test]
 fn test_transaction_bytes_unchanged() {
-    use omni_transaction::near::types::{BlockHash, Secp256K1Signature, Signature};
+    use omni_transaction::near::types::{
+        BlockHash, FunctionCallAction, Secp256K1Signature, Signature, TransferAction,
+    };
     use omni_transaction::{NEAR, TransactionBuilder};
 
     let mut context = get_context(accounts(1));
@@ -529,20 +579,24 @@ fn test_transaction_bytes_unchanged() {
             .unwrap(),
     );
     testing_env!(context.build());
-    let contract = TradingAccountContract::new(accounts(1), "v1.signer".parse().unwrap());
 
-    let actions: Vec<ActionString> = serde_json::from_str(
-        r#"[
-            {"type":"FunctionCall","method_name":"near_deposit","args":{"a":[1,2,"x"]},"gas":"30000000000000","deposit":"123456789012345678901234567"},
-            {"type":"FunctionCall","method_name":"ft_transfer_call","args":{},"gas":"300000000000000","deposit":"1"},
-            {"type":"Transfer","deposit":"340282366920938463463374607431768211455"}
-        ]"#,
-    )
-    .unwrap();
-    let contract_id: AccountId = "wrap.near".parse().unwrap();
-    let omni_actions = contract
-        .validate_and_build_actions(actions, &contract_id)
-        .unwrap();
+    let omni_actions = vec![
+        OmniAction::FunctionCall(Box::new(FunctionCallAction {
+            method_name: "near_deposit".to_string(),
+            args: br#"{"a":[1,2,"x"]}"#.to_vec(),
+            gas: Gas::from_tgas(30),
+            deposit: NearToken::from_yoctonear(123456789012345678901234567),
+        })),
+        OmniAction::FunctionCall(Box::new(FunctionCallAction {
+            method_name: "ft_transfer_call".to_string(),
+            args: b"{}".to_vec(),
+            gas: Gas::from_tgas(300),
+            deposit: NearToken::from_yoctonear(1),
+        })),
+        OmniAction::Transfer(TransferAction {
+            deposit: NearToken::from_yoctonear(u128::MAX),
+        }),
+    ];
     let tx = TransactionBuilder::new::<NEAR>()
         .signer_id(near_sdk::env::current_account_id().to_string())
         .signer_public_key(
@@ -551,7 +605,7 @@ fn test_transaction_bytes_unchanged() {
                 .unwrap(),
         )
         .nonce(42)
-        .receiver_id(contract_id.to_string())
+        .receiver_id("wrap.near".to_string())
         .block_hash(BlockHash([7u8; 32]))
         .actions(omni_actions)
         .build();
@@ -588,10 +642,7 @@ fn test_transaction_bytes_unchanged() {
 // sign_request_callback with a response shaped like v1.signer's: it must parse the response,
 // rebuild the transaction from request_signature's JSON and attach the signature.
 fn callback_setup() -> (TradingAccountContract, NearTransaction, String) {
-    callback_setup_with(
-        "wrap.near",
-        r#"[{"type":"FunctionCall","method_name":"near_deposit","args":{},"gas":"30000000000000","deposit":"50000000000000000000000"},{"type":"Transfer","deposit":"1"}]"#,
-    )
+    callback_setup_with("intents.near", MT_TRANSFER)
 }
 
 /// A trading account, the transaction request_signature builds for `actions_json` sent to
