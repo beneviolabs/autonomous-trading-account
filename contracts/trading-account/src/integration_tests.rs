@@ -476,3 +476,129 @@ async fn test_migrate_at_current_version_keeps_state() -> Result<()> {
     assert!(is_agent(&trading_account, agent.id()).await?);
     Ok(())
 }
+
+// ---- upgrade and do_upgrade ----
+
+// Stands in for the factory: get_proxy_code_base58_hash returns a fixed hash.
+const STUB_FACTORY_WAT: &str = r#"(module
+  (import "env" "value_return" (func $value_return (param i64 i64)))
+  (memory (export "memory") 1)
+  (data (i32.const 0) "\"6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f\"")
+  (func (export "get_proxy_code_base58_hash")
+    (call $value_return (i64.const 46) (i64.const 0))))"#;
+
+/// A trading account created as a subaccount of a "factory" account running `factory_wasm` (no
+/// contract if None), as the real factory creates them. Returns the trading account and its owner.
+async fn deploy_under_factory(
+    worker: &Worker<Sandbox>,
+    factory_wasm: Option<&[u8]>,
+) -> Result<(Contract, Account)> {
+    let factory = worker
+        .root_account()?
+        .create_subaccount("factory")
+        .initial_balance(NearToken::from_near(20))
+        .transact()
+        .await?
+        .into_result()?;
+    if let Some(wasm) = factory_wasm {
+        factory.deploy(wasm).await?.into_result()?;
+    }
+    let trading_account = factory
+        .create_subaccount("ta")
+        .initial_balance(NearToken::from_near(10))
+        .transact()
+        .await?
+        .into_result()?
+        .deploy(TRADING_ACCOUNT_WASM)
+        .await?
+        .into_result()?;
+    let owner = worker.dev_create_account().await?;
+    trading_account
+        .call("new")
+        .args_json(json!({ "owner_id": owner.id(), "signer_id": "v1.signer-prod.testnet" }))
+        .transact()
+        .await?
+        .into_result()?;
+    Ok((trading_account, owner))
+}
+
+/// `owner` calls upgrade(expected_hash) with the one yoctoNEAR it requires.
+async fn upgrade(
+    owner: &Account,
+    trading_account: &Contract,
+    expected_hash: &str,
+) -> Result<near_workspaces::result::ExecutionFinalResult> {
+    Ok(owner
+        .call(trading_account.id(), "upgrade")
+        .args_json(json!({ "expected_hash": expected_hash }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(300))
+        .transact()
+        .await?)
+}
+
+// do_upgrade swaps the account's code, so only the account itself (via upgrade) may call it.
+#[tokio::test]
+async fn test_do_upgrade_is_private() -> Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let trading_account = deploy_trading_account(&worker).await?;
+    let stranger = worker.dev_create_account().await?;
+
+    let outcome = stranger
+        .call(trading_account.id(), "do_upgrade")
+        .args_json(json!({ "expected_hash": "6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f" }))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+
+    assert!(outcome.is_failure());
+    let failures = format!("{:?}", outcome.failures());
+    assert!(
+        failures.contains("Method do_upgrade is private"),
+        "{}",
+        failures
+    );
+    Ok(())
+}
+
+// A failure in do_upgrade, two receipts down, must fail the owner's transaction rather than
+// report success. That holds only while every method in the chain returns its promise.
+#[tokio::test]
+async fn test_upgrade_fails_when_the_factory_points_elsewhere() -> Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let stub_factory = wat::parse_str(STUB_FACTORY_WAT)?;
+    let (trading_account, owner) = deploy_under_factory(&worker, Some(&stub_factory)).await?;
+    let before = trading_account.view_state().await?;
+
+    let outcome = upgrade(&owner, &trading_account, "11111111111111111111111111111111").await?;
+
+    assert!(outcome.is_failure(), "{:?}", outcome);
+    let failures = format!("{:?}", outcome.failures());
+    assert!(
+        failures.contains("factory pointer does not match expected_hash"),
+        "{}",
+        failures
+    );
+    assert_eq!(trading_account.view_state().await?, before);
+    Ok(())
+}
+
+// If the factory can't answer, do_upgrade must fail too (#[callback_unwrap], not
+// #[callback_result], which would swallow the error and report success).
+#[tokio::test]
+async fn test_upgrade_fails_when_the_factory_view_fails() -> Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let (trading_account, owner) = deploy_under_factory(&worker, None).await?;
+    let before = trading_account.view_state().await?;
+
+    let outcome = upgrade(
+        &owner,
+        &trading_account,
+        "6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f",
+    )
+    .await?;
+
+    assert!(outcome.is_failure(), "{:?}", outcome);
+    assert_eq!(trading_account.view_state().await?, before);
+    Ok(())
+}

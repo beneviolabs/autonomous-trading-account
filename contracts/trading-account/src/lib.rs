@@ -38,6 +38,9 @@ mod utils;
 const GAS_FOR_REQUEST_SIGNATURE: Gas = Gas::from_tgas(100);
 const BASE_GAS: Gas = Gas::from_tgas(10); // Base gas for contract execution
 const CALLBACK_GAS: Gas = Gas::from_tgas(10); // Gas reserved for callback
+const MIGRATE_GAS: Gas = Gas::from_tgas(50); // migrate's budget; to be re-measured in the sandbox
+const FACTORY_VIEW_GAS: Gas = Gas::from_tgas(5); // The factory's get_proxy_code_base58_hash
+const DO_UPGRADE_GAS: Gas = Gas::from_tgas(60); // do_upgrade's own work plus MIGRATE_GAS, which it hands on
 const NEAR_MPC_DOMAIN_ID: u32 = 0;
 const MAX_AGENTS: u64 = 10; // Maximum number of agents per trading account
 // NEAR accepts a transaction nonce only below block height * this multiplier (nearcore's name).
@@ -162,6 +165,53 @@ impl TradingAccountContract {
         migrated
     }
 
+    /// Upgrades this account to the code hash its factory points at. The owner passes the hash
+    /// they expect, so a pointer moved after they looked can't change what they sign.
+    #[payable]
+    pub fn upgrade(&mut self, expected_hash: String) -> Promise {
+        // One yocto means the owner signed with a full-access key, not a function-call key.
+        near_sdk::assert_one_yocto();
+        self.assert_owner();
+
+        // Every promise in this chain is returned. A dropped one would let the owner's
+        // transaction report success even when a later receipt fails.
+        Promise::new(Self::factory_id())
+            .function_call(
+                "get_proxy_code_base58_hash".to_string(),
+                vec![],
+                NearToken::from_near(0),
+                FACTORY_VIEW_GAS,
+            )
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(DO_UPGRADE_GAS)
+                    .do_upgrade(expected_hash),
+            )
+    }
+
+    // callback_unwrap, not callback_result: a failed factory view must fail the upgrade.
+    #[private]
+    pub fn do_upgrade(&self, expected_hash: String, #[callback_unwrap] latest: String) -> Promise {
+        assert_eq!(
+            latest, expected_hash,
+            "factory pointer does not match expected_hash"
+        );
+        let hash = Base58CryptoHash::try_from(latest.as_str())
+            .unwrap_or_else(|_| env::panic_str("invalid code hash"));
+
+        // One batch on this account: the code swap and migrate share a receipt, so a migrate
+        // panic reverts the swap. Don't chain migrate with .then: that is a second receipt, so
+        // the swap would commit on its own and leave the new code on unmigrated state.
+        Promise::new(env::current_account_id())
+            .use_global_contract(hash)
+            .function_call(
+                "migrate".to_string(),
+                vec![],
+                NearToken::from_near(0),
+                MIGRATE_GAS,
+            )
+    }
+
     // Owner methods for managing agents
     pub fn add_agent(&mut self, account_id: AccountId) {
         self.assert_owner();
@@ -203,6 +253,15 @@ impl TradingAccountContract {
     }
 
     // Helper methods
+    // The factory only creates direct subaccounts, so the parent is the factory. Derived, never
+    // stored or taken from a caller.
+    fn factory_id() -> AccountId {
+        env::current_account_id()
+            .get_parent_account_id()
+            .map(AccountIdRef::to_owned)
+            .unwrap_or_else(|| env::panic_str("trading account has no parent factory"))
+    }
+
     fn assert_owner(&self) {
         assert_eq!(
             env::predecessor_account_id(),
