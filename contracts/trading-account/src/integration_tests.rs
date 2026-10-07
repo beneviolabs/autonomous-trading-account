@@ -24,9 +24,9 @@ async fn deploy_trading_account(worker: &Worker<impl DevNetwork>) -> Result<Cont
     Ok(trading_account)
 }
 
-async fn is_authorized(trading_account: &Contract, account_id: &AccountId) -> Result<bool> {
+async fn is_agent(trading_account: &Contract, account_id: &AccountId) -> Result<bool> {
     Ok(trading_account
-        .call("is_authorized")
+        .call("is_agent")
         .args_json(json!({ "account_id": account_id }))
         .view()
         .await?
@@ -40,37 +40,65 @@ async fn test_new_sets_owner() -> Result<()> {
 
     let owner_id: AccountId = trading_account.view("get_owner_id").await?.json()?;
     assert_eq!(&owner_id, trading_account.id());
-    // is_authorized is also true for the owner.
-    assert!(is_authorized(&trading_account, &owner_id).await?);
+    // The owner isn't an agent unless it adds itself.
+    assert!(!is_agent(&trading_account, &owner_id).await?);
+    Ok(())
+}
+
+// The methods were renamed to "agent" names in 1.0.0 with no aliases, so the old names must not exist.
+#[tokio::test]
+async fn test_authorized_user_method_names_are_gone() -> Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let trading_account = deploy_trading_account(&worker).await?;
+    let args = json!({ "account_id": trading_account.id() });
+
+    for method in ["add_authorized_user", "remove_authorized_user"] {
+        let result = trading_account
+            .call(method)
+            .args_json(args.clone())
+            .transact()
+            .await?;
+        assert!(
+            format!("{:?}", result.into_result()).contains("MethodNotFound"),
+            "{method} should not exist"
+        );
+    }
+    for method in ["is_authorized", "get_authorized_users"] {
+        let result = trading_account.view(method).args_json(args.clone()).await;
+        assert!(
+            format!("{:?}", result).contains("MethodNotFound"),
+            "{method} should not exist"
+        );
+    }
     Ok(())
 }
 
 #[tokio::test]
-async fn test_add_and_remove_authorized_user() -> Result<()> {
+async fn test_add_and_remove_agent() -> Result<()> {
     let worker = near_workspaces::sandbox().await?;
     let trading_account = deploy_trading_account(&worker).await?;
     let agent = worker.dev_create_account().await?;
 
     trading_account
-        .call("add_authorized_user")
+        .call("add_agent")
         .args_json(json!({ "account_id": agent.id() }))
         .transact()
         .await?
         .into_result()?;
-    assert!(is_authorized(&trading_account, agent.id()).await?);
+    assert!(is_agent(&trading_account, agent.id()).await?);
 
     trading_account
-        .call("remove_authorized_user")
+        .call("remove_agent")
         .args_json(json!({ "account_id": agent.id() }))
         .transact()
         .await?
         .into_result()?;
-    assert!(!is_authorized(&trading_account, agent.id()).await?);
+    assert!(!is_agent(&trading_account, agent.id()).await?);
     Ok(())
 }
 
 #[tokio::test]
-async fn test_get_authorized_users() -> Result<()> {
+async fn test_get_agents() -> Result<()> {
     let worker = near_workspaces::sandbox().await?;
     let trading_account = deploy_trading_account(&worker).await?;
     let user1 = worker.dev_create_account().await?;
@@ -78,16 +106,15 @@ async fn test_get_authorized_users() -> Result<()> {
 
     trading_account
         .batch()
-        .call(Function::new("add_authorized_user").args_json(json!({ "account_id": user1.id() })))
-        .call(Function::new("add_authorized_user").args_json(json!({ "account_id": user2.id() })))
+        .call(Function::new("add_agent").args_json(json!({ "account_id": user1.id() })))
+        .call(Function::new("add_agent").args_json(json!({ "account_id": user2.id() })))
         .transact()
         .await?
         .into_result()?;
 
-    let authorized_users: Vec<AccountId> =
-        trading_account.view("get_authorized_users").await?.json()?;
-    assert!(authorized_users.contains(user1.id()));
-    assert!(authorized_users.contains(user2.id()));
+    let agents: Vec<AccountId> = trading_account.view("get_agents").await?.json()?;
+    assert!(agents.contains(user1.id()));
+    assert!(agents.contains(user2.id()));
     Ok(())
 }
 
@@ -115,7 +142,7 @@ async fn test_request_signature_rejects_unauthorized_caller() -> Result<()> {
     assert!(outcome.is_failure());
     let failures = format!("{:?}", outcome.failures());
     assert!(
-        failures.contains("Unauthorized: only authorized users can request signatures"),
+        failures.contains("Unauthorized: only agents can request signatures"),
         "{}",
         failures
     );
@@ -158,7 +185,7 @@ async fn deploy_with_stub_signer(
         .into_result()?;
     let agent = worker.dev_create_account().await?;
     trading_account
-        .call("add_authorized_user")
+        .call("add_agent")
         .args_json(json!({ "account_id": agent.id() }))
         .transact()
         .await?
