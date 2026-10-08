@@ -3996,6 +3996,8 @@ dependencies = [
  "borsh",
  "bs58 0.5.1",
  "hex",
+ "near-crypto",
+ "near-primitives",
  "near-sdk",
  "near-workspaces",
  "omni-transaction",
