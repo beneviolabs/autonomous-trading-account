@@ -5,6 +5,8 @@ on:
   push:
     # PR branches are covered by pull_request; without this filter every push runs twice.
     branches: [ main ]
+    # Release tags (docs/releases.md). Path filters don't apply to tag pushes.
+    tags: [ 'trading-account/v*' ]
     paths:
       - '**/*.rs'
       - '**/Cargo.toml'
@@ -91,6 +93,21 @@ jobs:
           # Mirrors contracts/.cargo/audit.toml.
           allow-ghsas: GHSA-2mjx-qc3c-rqvc
 
+  # The trading account changed since its last release only with a higher CONTRACT_VERSION.
+  version:
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history and tags, to diff against the last release tag.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check CONTRACT_VERSION
+        run: scripts/check-contract-version.sh
+
   # Reproducible release build in NEAR's pinned Docker image. Needs no Rust cache.
   build:
     runs-on: ubuntu-latest
@@ -111,6 +128,13 @@ jobs:
         # Builds inside NEAR's pinned image (see [package.metadata.near.reproducible_build]).
         # The printed hashes are reproducible by anyone with `make release` on this commit.
         run: make release
+
+      - name: Check the release tag
+        if: startsWith(github.ref, 'refs/tags/trading-account/v')
+        run: |
+          # checkout leaves the tag lightweight; fetch the annotated tag and its message.
+          git fetch --force origin "+$GITHUB_REF:$GITHUB_REF"
+          scripts/check-contract-version.sh "$GITHUB_REF_NAME" contracts/target/near/trading_account/trading_account.wasm
 
       - name: Contract size check
         run: |
