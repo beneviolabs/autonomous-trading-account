@@ -1,9 +1,12 @@
 use crate::test_support;
 use anyhow::Result;
 use near_workspaces::network::Sandbox;
-use near_workspaces::types::{Gas, NearToken};
-use near_workspaces::{Account, AccountId, Contract, DevNetwork, Worker, operations::Function};
+use near_workspaces::types::{Gas, KeyType, NearToken, SecretKey};
+use near_workspaces::{
+    Account, AccountId, Contract, ContractState, DevNetwork, Worker, operations::Function,
+};
 use serde_json::json;
+use std::str::FromStr;
 
 const TRADING_ACCOUNT_WASM: &[u8] =
     include_bytes!("../../target/near/trading_account/trading_account.wasm");
@@ -149,8 +152,10 @@ async fn test_request_signature_rejects_unauthorized_caller() -> Result<()> {
     Ok(())
 }
 
-// Stands in for v1.signer: `set_response` stores the call's input, and `sign` returns it.
-const STUB_SIGNER_WAT: &str = r#"(module
+/// A stub contract: `setter` stores the call's input, and `getter` returns it.
+fn echo_stub(setter: &str, getter: &str) -> Result<Vec<u8>> {
+    Ok(wat::parse_str(format!(
+        r#"(module
   (import "env" "input" (func $input (param i64)))
   (import "env" "register_len" (func $register_len (param i64) (result i64)))
   (import "env" "read_register" (func $read_register (param i64 i64)))
@@ -158,16 +163,23 @@ const STUB_SIGNER_WAT: &str = r#"(module
   (import "env" "storage_read" (func $storage_read (param i64 i64 i64) (result i64)))
   (import "env" "value_return" (func $value_return (param i64 i64)))
   (memory (export "memory") 1)
-  (data (i32.const 0) "r")
-  (func (export "set_response")
+  (data (i32.const 0) "k")
+  (func (export "{setter}")
     (call $input (i64.const 0))
     (call $read_register (i64.const 0) (i64.const 1024))
     (drop (call $storage_write (i64.const 1) (i64.const 0)
       (call $register_len (i64.const 0)) (i64.const 1024) (i64.const 1))))
-  (func (export "sign")
+  (func (export "{getter}")
     (drop (call $storage_read (i64.const 1) (i64.const 0) (i64.const 0)))
     (call $read_register (i64.const 0) (i64.const 1024))
-    (call $value_return (call $register_len (i64.const 0)) (i64.const 1024))))"#;
+    (call $value_return (call $register_len (i64.const 0)) (i64.const 1024))))"#
+    ))?)
+}
+
+/// Stands in for v1.signer: `set_response` primes what `sign` returns.
+fn stub_signer() -> Result<Vec<u8>> {
+    echo_stub("set_response", "sign")
+}
 
 /// A trading account whose MPC signer is the stub, owned by itself (so `trading_account.call(...)`
 /// calls as the owner), with an authorized agent. Returns the trading account, the stub signer and
@@ -175,7 +187,7 @@ const STUB_SIGNER_WAT: &str = r#"(module
 async fn deploy_with_stub_signer(
     worker: &Worker<impl DevNetwork>,
 ) -> Result<(Contract, Contract, Account)> {
-    let signer = worker.dev_deploy(&wat::parse_str(STUB_SIGNER_WAT)?).await?;
+    let signer = worker.dev_deploy(&stub_signer()?).await?;
     let trading_account = worker.dev_deploy(TRADING_ACCOUNT_WASM).await?;
     trading_account
         .call("new")
@@ -477,62 +489,233 @@ async fn test_migrate_at_current_version_keeps_state() -> Result<()> {
     Ok(())
 }
 
-// ---- upgrade and do_upgrade ----
+// ---- Accounts as the factory creates them ----
+//
+// The upgrade tests use trading accounts set up the way mainnet runs them: the code is a published
+// global contract, and the account is a subaccount of a stub factory, which is where upgrade reads
+// the latest hash from. near-workspaces can't send global-contract actions, so these transactions
+// are built and signed here.
 
-// Stands in for the factory: get_proxy_code_base58_hash returns a fixed hash.
-const STUB_FACTORY_WAT: &str = r#"(module
-  (import "env" "value_return" (func $value_return (param i64 i64)))
-  (memory (export "memory") 1)
-  (data (i32.const 0) "\"6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f\"")
-  (func (export "get_proxy_code_base58_hash")
-    (call $value_return (i64.const 46) (i64.const 0))))"#;
+/// v0's code, fetched from mainnet by its global hash. It can't be rebuilt from source.
+const V0_WASM: &[u8] = include_bytes!("../res/v0.wasm");
+const V0_HASH: &str = "6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f";
 
-/// A trading account created as a subaccount of a "factory" account running `factory_wasm` (no
-/// contract if None), as the real factory creates them. Returns the trading account and its owner.
-async fn deploy_under_factory(
-    worker: &Worker<Sandbox>,
-    factory_wasm: Option<&[u8]>,
-) -> Result<(Contract, Account)> {
-    let factory = worker
-        .root_account()?
-        .create_subaccount("factory")
-        .initial_balance(NearToken::from_near(20))
-        .transact()
-        .await?
-        .into_result()?;
-    if let Some(wasm) = factory_wasm {
-        factory.deploy(wasm).await?.into_result()?;
-    }
-    let trading_account = factory
-        .create_subaccount("ta")
-        .initial_balance(NearToken::from_near(10))
-        .transact()
-        .await?
-        .into_result()?
-        .deploy(TRADING_ACCOUNT_WASM)
-        .await?
-        .into_result()?;
-    let owner = worker.dev_create_account().await?;
-    trading_account
-        .call("new")
-        .args_json(json!({ "owner_id": owner.id(), "signer_id": "v1.signer-prod.testnet" }))
-        .transact()
-        .await?
-        .into_result()?;
-    Ok((trading_account, owner))
+/// The bs58 SHA-256 a global contract is published under.
+fn code_hash(code: &[u8]) -> String {
+    use sha2::Digest;
+    bs58::encode(sha2::Sha256::digest(code)).into_string()
 }
 
-/// `owner` calls upgrade(expected_hash) with the one yoctoNEAR it requires.
+/// `code` with an empty custom section named "x" appended (id 0, 2 bytes, name length 1): the
+/// same contract under a different hash, so an upgrade from `code` to it swaps the code for real.
+fn rehashed(code: &[u8]) -> Vec<u8> {
+    [code, &[0, 2, 1, b'x']].concat()
+}
+
+/// Signs `actions` from `signer` to `receiver_id` and sends them. Returns the final outcome's
+/// `status`, which is `{"SuccessValue": …}` or `{"Failure": …}`.
+async fn send_actions(
+    worker: &Worker<Sandbox>,
+    signer: &Account,
+    receiver_id: &AccountId,
+    actions: Vec<near_primitives::transaction::Action>,
+) -> Result<serde_json::Value> {
+    use near_primitives::transaction::{SignedTransaction, Transaction, TransactionV0};
+
+    let secret_key: near_crypto::SecretKey = signer.secret_key().to_string().parse()?;
+    let nonce = worker
+        .view_access_key(signer.id(), &signer.secret_key().public_key())
+        .await?
+        .nonce;
+    let tx = Transaction::V0(TransactionV0 {
+        signer_id: signer.id().clone(),
+        public_key: secret_key.public_key(),
+        nonce: nonce + 1,
+        receiver_id: receiver_id.clone(),
+        block_hash: near_primitives::hash::CryptoHash(worker.view_block().await?.hash().0),
+        actions,
+    });
+    let signature = secret_key.sign(tx.get_hash_and_size().0.as_ref());
+    let signed = borsh::to_vec(&SignedTransaction::new(signature, tx))?;
+    let response = broadcast(
+        worker,
+        &near_sdk::base64::Engine::encode(
+            &near_sdk::base64::engine::general_purpose::STANDARD,
+            signed,
+        ),
+    )
+    .await?;
+    anyhow::ensure!(response.get("error").is_none(), "{response}");
+    Ok(response["result"]["status"].clone())
+}
+
+fn succeeded(status: &serde_json::Value) -> bool {
+    status.get("SuccessValue").is_some()
+}
+
+/// Publishes `code` as a global contract under its hash, and returns the hash.
+async fn publish_global(worker: &Worker<Sandbox>, code: &[u8]) -> Result<String> {
+    use near_primitives::action::{DeployGlobalContractAction, GlobalContractDeployMode};
+    use near_primitives::transaction::Action;
+
+    let root = worker.root_account()?;
+    let status = send_actions(
+        worker,
+        &root,
+        root.id(),
+        vec![Action::DeployGlobalContract(DeployGlobalContractAction {
+            code: code.to_vec().into(),
+            deploy_mode: GlobalContractDeployMode::CodeHash,
+        })],
+    )
+    .await?;
+    anyhow::ensure!(succeeded(&status), "{status}");
+    Ok(code_hash(code))
+}
+
+/// The action that switches an account to the global contract `hash`.
+fn use_global(hash: &str) -> near_primitives::transaction::Action {
+    use near_primitives::action::{GlobalContractIdentifier, UseGlobalContractAction};
+    let hash = near_primitives::hash::CryptoHash::from_str(hash).expect("bs58 code hash");
+    near_primitives::transaction::Action::UseGlobalContract(Box::new(UseGlobalContractAction {
+        contract_identifier: GlobalContractIdentifier::CodeHash(hash),
+    }))
+}
+
+/// Stands in for the factory: `set_hash` sets the JSON string `get_proxy_code_base58_hash` returns.
+/// Until it's set, `get_proxy_code_base58_hash` fails.
+fn stub_factory() -> Result<Vec<u8>> {
+    echo_stub("set_hash", "get_proxy_code_base58_hash")
+}
+
+/// A trading account created by the stub factory, with its owner and its (stub) MPC signer.
+struct FactoryAccount {
+    trading_account: Contract,
+    owner: Account,
+    signer: Contract,
+}
+
+/// Creates a trading account running the global contract `hash`, the way `create_proxy_global`
+/// does: one batch from the factory that creates the account, switches it to the global code and
+/// calls `new`. The owner is an implicit account, the only kind the factory accepts.
+async fn create_factory_account(worker: &Worker<Sandbox>, hash: &str) -> Result<FactoryAccount> {
+    use near_primitives::transaction::{
+        Action, CreateAccountAction, FunctionCallAction, TransferAction,
+    };
+
+    let root = worker.root_account()?;
+    let factory = root
+        .create_subaccount("factory")
+        .initial_balance(NearToken::from_near(50))
+        .transact()
+        .await?
+        .into_result()?;
+    factory.deploy(&stub_factory()?).await?.into_result()?;
+    let signer = worker.dev_deploy(&stub_signer()?).await?;
+    let owner_key = SecretKey::from_random(KeyType::ED25519);
+    let owner_id: AccountId = hex::encode(owner_key.public_key().key_data()).parse()?;
+    root.transfer_near(&owner_id, NearToken::from_near(10))
+        .await?
+        .into_result()?;
+    let owner = Account::from_secret_key(owner_id, owner_key, worker);
+
+    let id: AccountId = format!("ta.{}", factory.id()).parse()?;
+    let status = send_actions(
+        worker,
+        &factory,
+        &id,
+        vec![
+            Action::CreateAccount(CreateAccountAction {}),
+            Action::Transfer(TransferAction {
+                deposit: NearToken::from_near(10),
+            }),
+            use_global(hash),
+            Action::FunctionCall(Box::new(FunctionCallAction {
+                method_name: "new".to_string(),
+                args: serde_json::to_vec(
+                    &json!({ "owner_id": owner.id(), "signer_id": signer.id() }),
+                )?,
+                gas: near_primitives::types::Gas::from_teragas(50),
+                deposit: NearToken::from_near(0),
+            })),
+        ],
+    )
+    .await?;
+    anyhow::ensure!(succeeded(&status), "{status}");
+    // Like on mainnet, the account holds no keys. This random one only names it, for views and
+    // for calls other accounts make to it.
+    let trading_account =
+        Contract::from_secret_key(id, SecretKey::from_random(KeyType::ED25519), worker);
+    Ok(FactoryAccount {
+        trading_account,
+        owner,
+        signer,
+    })
+}
+
+/// Points the stub factory above `trading_account_id` at `hash`.
+async fn point_factory_at(
+    worker: &Worker<Sandbox>,
+    trading_account_id: &AccountId,
+    hash: &str,
+) -> Result<()> {
+    let factory_id: AccountId = trading_account_id
+        .get_parent_account_id()
+        .expect("trading account has a parent")
+        .into();
+    worker
+        .root_account()?
+        .call(&factory_id, "set_hash")
+        .args_json(hash)
+        .transact()
+        .await?
+        .into_result()?;
+    Ok(())
+}
+
+/// The bs58 hash of the global contract the account runs.
+async fn global_code_hash(worker: &Worker<Sandbox>, account_id: &AccountId) -> Result<String> {
+    match worker.view_account(account_id).await?.contract_state {
+        ContractState::GlobalHash(hash) => Ok(hash.to_string()),
+        other => anyhow::bail!("not on a global contract: {other:?}"),
+    }
+}
+
+/// Rewrites the account's state version byte to one newer than this build knows, so this build's
+/// migrate refuses it as a downgrade. Returns the patched STATE bytes.
+async fn patch_future_state_version(
+    worker: &Worker<Sandbox>,
+    account_id: &AccountId,
+) -> Result<Vec<u8>> {
+    let mut state = worker
+        .view_state(account_id)
+        .await?
+        .remove(b"STATE".as_slice())
+        .expect("STATE");
+    state[0] = crate::STATE_VERSION + 1;
+    worker.patch_state(account_id, b"STATE", &state).await?;
+    Ok(state)
+}
+
+#[test]
+fn test_v0_fixture_is_the_mainnet_code() {
+    assert_eq!(code_hash(V0_WASM), V0_HASH);
+}
+
+// ---- upgrade and do_upgrade ----
+
+/// `account`'s owner calls upgrade(expected_hash) with the one yoctoNEAR it requires and the
+/// 100 Tgas docs/reference.md tells callers to attach.
 async fn upgrade(
-    owner: &Account,
-    trading_account: &Contract,
+    account: &FactoryAccount,
     expected_hash: &str,
 ) -> Result<near_workspaces::result::ExecutionFinalResult> {
-    Ok(owner
-        .call(trading_account.id(), "upgrade")
+    Ok(account
+        .owner
+        .call(account.trading_account.id(), "upgrade")
         .args_json(json!({ "expected_hash": expected_hash }))
         .deposit(NearToken::from_yoctonear(1))
-        .gas(Gas::from_tgas(300))
+        .gas(Gas::from_tgas(100))
         .transact()
         .await?)
 }
@@ -546,7 +729,7 @@ async fn test_do_upgrade_is_private() -> Result<()> {
 
     let outcome = stranger
         .call(trading_account.id(), "do_upgrade")
-        .args_json(json!({ "expected_hash": "6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f" }))
+        .args_json(json!({ "expected_hash": V0_HASH }))
         .gas(Gas::from_tgas(100))
         .transact()
         .await?;
@@ -566,11 +749,12 @@ async fn test_do_upgrade_is_private() -> Result<()> {
 #[tokio::test]
 async fn test_upgrade_fails_when_the_factory_points_elsewhere() -> Result<()> {
     let worker = near_workspaces::sandbox().await?;
-    let stub_factory = wat::parse_str(STUB_FACTORY_WAT)?;
-    let (trading_account, owner) = deploy_under_factory(&worker, Some(&stub_factory)).await?;
-    let before = trading_account.view_state().await?;
+    let current = publish_global(&worker, TRADING_ACCOUNT_WASM).await?;
+    let account = create_factory_account(&worker, &current).await?;
+    point_factory_at(&worker, account.trading_account.id(), V0_HASH).await?;
+    let before = account.trading_account.view_state().await?;
 
-    let outcome = upgrade(&owner, &trading_account, "11111111111111111111111111111111").await?;
+    let outcome = upgrade(&account, "11111111111111111111111111111111").await?;
 
     assert!(outcome.is_failure(), "{:?}", outcome);
     let failures = format!("{:?}", outcome.failures());
@@ -579,7 +763,7 @@ async fn test_upgrade_fails_when_the_factory_points_elsewhere() -> Result<()> {
         "{}",
         failures
     );
-    assert_eq!(trading_account.view_state().await?, before);
+    assert_eq!(account.trading_account.view_state().await?, before);
     Ok(())
 }
 
@@ -588,17 +772,244 @@ async fn test_upgrade_fails_when_the_factory_points_elsewhere() -> Result<()> {
 #[tokio::test]
 async fn test_upgrade_fails_when_the_factory_view_fails() -> Result<()> {
     let worker = near_workspaces::sandbox().await?;
-    let (trading_account, owner) = deploy_under_factory(&worker, None).await?;
-    let before = trading_account.view_state().await?;
+    let current = publish_global(&worker, TRADING_ACCOUNT_WASM).await?;
+    // The stub factory's hash is never set, so its view fails.
+    let account = create_factory_account(&worker, &current).await?;
+    let before = account.trading_account.view_state().await?;
 
-    let outcome = upgrade(
-        &owner,
-        &trading_account,
-        "6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f",
-    )
-    .await?;
+    let outcome = upgrade(&account, V0_HASH).await?;
 
     assert!(outcome.is_failure(), "{:?}", outcome);
-    assert_eq!(trading_account.view_state().await?, before);
+    assert_eq!(account.trading_account.view_state().await?, before);
     Ok(())
+}
+
+// The code swap and migrate share one receipt, so a migrate panic leaves the old code running on
+// the old state, and the owner's transaction fails.
+#[tokio::test]
+async fn test_upgrade_reverts_when_migrate_panics() -> Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let current = publish_global(&worker, TRADING_ACCOUNT_WASM).await?;
+    let candidate = publish_global(&worker, &rehashed(TRADING_ACCOUNT_WASM)).await?;
+    let account = create_factory_account(&worker, &current).await?;
+    point_factory_at(&worker, account.trading_account.id(), &candidate).await?;
+    let state = patch_future_state_version(&worker, account.trading_account.id()).await?;
+
+    let outcome = upgrade(&account, &candidate).await?;
+
+    assert!(outcome.is_failure(), "{:?}", outcome);
+    let failures = format!("{:?}", outcome.failures());
+    assert!(failures.contains("downgrade not supported"), "{}", failures);
+    assert_eq!(
+        global_code_hash(&worker, account.trading_account.id()).await?,
+        current
+    );
+    assert_eq!(
+        account.trading_account.view_state().await?[b"STATE".as_slice()],
+        state
+    );
+    Ok(())
+}
+
+// ---- Release gate ----
+//
+// Every state version still carried must survive this build's migrate (RFC "Release gate"). Each
+// row starts from that version's released code, adds all 10 agents, upgrades to this build, and
+// checks the owner, the signer and every agent come back and request_signature still works. One
+// row per state version:
+// - v0: the mainnet v0 wasm, upgraded through the bootstrap batch.
+// - v1: starts from this build, because no versioned release exists yet. Once 1.0.0 ships, it
+//   starts from that release's wasm instead.
+
+/// Has the owner add 10 agents with `method` (`add_authorized_user` in v0). Returns the one agent
+/// with an account, which can request signatures, and all 10 ids.
+async fn add_ten_agents(
+    worker: &Worker<Sandbox>,
+    account: &FactoryAccount,
+    method: &str,
+) -> Result<(Account, Vec<AccountId>)> {
+    let agent = worker.dev_create_account().await?;
+    let mut agents = vec![agent.id().clone()];
+    agents.extend((1..10).map(|i| format!("agent{i}.test.near").parse().unwrap()));
+    for agent_id in &agents {
+        account
+            .owner
+            .call(account.trading_account.id(), method)
+            .args_json(json!({ "account_id": agent_id }))
+            .transact()
+            .await?
+            .into_result()?;
+    }
+    Ok((agent, agents))
+}
+
+/// Asserts the account came through the upgrade whole: this build's versions, the same owner,
+/// signer and agents, and a working request_signature for `agent`.
+async fn assert_upgraded_intact(
+    account: &FactoryAccount,
+    agent: &Account,
+    agents: &[AccountId],
+) -> Result<()> {
+    let ta = &account.trading_account;
+    let version: serde_json::Value = ta.view("contract_version").await?.json()?;
+    assert_eq!(
+        version,
+        json!({ "contract_version": crate::CONTRACT_VERSION, "state_version": crate::STATE_VERSION })
+    );
+    assert_eq!(
+        ta.view("get_owner_id").await?.json::<AccountId>()?,
+        *account.owner.id()
+    );
+    assert_eq!(
+        ta.view("get_signer_id").await?.json::<AccountId>()?,
+        *account.signer.id()
+    );
+    let mut got: Vec<AccountId> = ta.view("get_agents").await?.json()?;
+    got.sort();
+    let mut expected = agents.to_vec();
+    expected.sort();
+    assert_eq!(got, expected);
+    request_signature_with_stub(
+        ta,
+        &account.signer,
+        agent,
+        r#"[{"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"alice.near","token_id":"nep141:wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"}]"#,
+        1,
+        [0u8; 32],
+    )
+    .await?;
+    Ok(())
+}
+
+/// Bootstrap step 2: the owner adds a temporary full-access key with v0's `add_full_access_key`.
+/// Returns the trading account, signing with that key.
+async fn add_temporary_key(worker: &Worker<Sandbox>, account: &FactoryAccount) -> Result<Account> {
+    let key = SecretKey::from_random(KeyType::ED25519);
+    account
+        .owner
+        .call(account.trading_account.id(), "add_full_access_key")
+        .args_json(json!({ "public_key": key.public_key() }))
+        .transact()
+        .await?
+        .into_result()?;
+    Ok(Account::from_secret_key(
+        account.trading_account.id().clone(),
+        key,
+        worker,
+    ))
+}
+
+/// Bootstrap step 3: the temporary key switches the account to `hash`, migrates it and deletes
+/// itself, in one batch. Returns the final status.
+async fn send_bootstrap_batch(
+    worker: &Worker<Sandbox>,
+    temporary: &Account,
+    hash: &str,
+) -> Result<serde_json::Value> {
+    use near_primitives::transaction::{Action, DeleteKeyAction, FunctionCallAction};
+    send_actions(
+        worker,
+        temporary,
+        temporary.id(),
+        vec![
+            use_global(hash),
+            Action::FunctionCall(Box::new(FunctionCallAction {
+                method_name: "migrate".to_string(),
+                args: vec![],
+                gas: near_primitives::types::Gas::from_gas(crate::MIGRATE_GAS.as_gas()),
+                deposit: NearToken::from_near(0),
+            })),
+            Action::DeleteKey(Box::new(DeleteKeyAction {
+                public_key: temporary.secret_key().public_key().into(),
+            })),
+        ],
+    )
+    .await
+}
+
+#[tokio::test]
+async fn test_v0_bootstrap_keeps_owner_signer_and_agents() -> Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let v0 = publish_global(&worker, V0_WASM).await?;
+    let candidate = publish_global(&worker, TRADING_ACCOUNT_WASM).await?;
+    let account = create_factory_account(&worker, &v0).await?;
+    let (agent, agents) = add_ten_agents(&worker, &account, "add_authorized_user").await?;
+    let temporary = add_temporary_key(&worker, &account).await?;
+
+    let status = send_bootstrap_batch(&worker, &temporary, &candidate).await?;
+
+    assert!(succeeded(&status), "{status}");
+    assert_eq!(
+        global_code_hash(&worker, account.trading_account.id()).await?,
+        candidate
+    );
+    assert!(
+        worker
+            .view_access_key(
+                account.trading_account.id(),
+                &temporary.secret_key().public_key()
+            )
+            .await
+            .is_err(),
+        "temporary key survived the bootstrap"
+    );
+    assert_upgraded_intact(&account, &agent, &agents).await
+}
+
+// The code swap, migrate and the key deletion share one receipt, so a migrate panic undoes all
+// three, and the temporary key is still there to retry with.
+#[tokio::test]
+async fn test_v0_bootstrap_reverts_when_migrate_panics() -> Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let v0 = publish_global(&worker, V0_WASM).await?;
+    let candidate = publish_global(&worker, TRADING_ACCOUNT_WASM).await?;
+    let account = create_factory_account(&worker, &v0).await?;
+    let temporary = add_temporary_key(&worker, &account).await?;
+    let state = patch_future_state_version(&worker, account.trading_account.id()).await?;
+
+    let status = send_bootstrap_batch(&worker, &temporary, &candidate).await?;
+
+    assert!(
+        status.to_string().contains("downgrade not supported"),
+        "{status}"
+    );
+    assert_eq!(
+        global_code_hash(&worker, account.trading_account.id()).await?,
+        v0
+    );
+    assert_eq!(
+        account.trading_account.view_state().await?[b"STATE".as_slice()],
+        state
+    );
+    worker
+        .view_access_key(
+            account.trading_account.id(),
+            &temporary.secret_key().public_key(),
+        )
+        .await?;
+    Ok(())
+}
+
+// The v1 row. Upgrading a second time, once already at latest, swaps to the same code and
+// changes nothing.
+#[tokio::test]
+async fn test_upgrade_keeps_owner_signer_and_agents() -> Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let current = publish_global(&worker, TRADING_ACCOUNT_WASM).await?;
+    let candidate = publish_global(&worker, &rehashed(TRADING_ACCOUNT_WASM)).await?;
+    let account = create_factory_account(&worker, &current).await?;
+    let (agent, agents) = add_ten_agents(&worker, &account, "add_agent").await?;
+    point_factory_at(&worker, account.trading_account.id(), &candidate).await?;
+    let state = account.trading_account.view_state().await?;
+
+    for _ in 0..2 {
+        upgrade(&account, &candidate).await?.into_result()?;
+
+        assert_eq!(
+            global_code_hash(&worker, account.trading_account.id()).await?,
+            candidate
+        );
+        assert_eq!(account.trading_account.view_state().await?, state);
+    }
+    assert_upgraded_intact(&account, &agent, &agents).await
 }
