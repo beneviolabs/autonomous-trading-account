@@ -93,21 +93,6 @@ jobs:
           # Mirrors contracts/.cargo/audit.toml.
           allow-ghsas: GHSA-2mjx-qc3c-rqvc
 
-  # The trading account changed since its last release only with a higher CONTRACT_VERSION.
-  version:
-    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # Full history and tags, to diff against the last release tag.
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Check CONTRACT_VERSION
-        run: scripts/check-contract-version.sh
-
   # Reproducible release build in NEAR's pinned Docker image. Needs no Rust cache.
   build:
     runs-on: ubuntu-latest
@@ -129,13 +114,6 @@ jobs:
         # The printed hashes are reproducible by anyone with `make release` on this commit.
         run: make release
 
-      - name: Check the release tag
-        if: startsWith(github.ref, 'refs/tags/trading-account/v')
-        run: |
-          # checkout leaves the tag lightweight; fetch the annotated tag and its message.
-          git fetch --force origin "+$GITHUB_REF:$GITHUB_REF"
-          scripts/check-contract-version.sh "$GITHUB_REF_NAME" contracts/target/near/trading_account/trading_account.wasm
-
       - name: Contract size check
         run: |
           MAX_SIZE=4194304
@@ -147,13 +125,78 @@ jobs:
             fi
           done
 
-      # Release builds: pushes to main, plus manual runs (use a manual run on a
-      # branch only for testnet rehearsals). Mainnet releases come from main.
+      # Release builds: pushes to main, release tags, plus manual runs (use a manual run on a
+      # branch only for testnet rehearsals). Mainnet releases come from commits on main.
       - name: Upload build artifacts
-        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: contract-wasm
           path: |
             contracts/target/near/trading_account/trading_account.wasm
             contracts/target/near/trading_account_factory/trading_account_factory.wasm
+
+  # A release tag publishes the trading account's wasm as a GitHub Release, once the tests and the
+  # reproducible build pass (docs/releases.md#versions).
+  release:
+    if: startsWith(github.ref, 'refs/tags/trading-account/v')
+    needs: [ test, build ]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # to create the GitHub Release
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Every release tag, to check this one is the newest.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: contract-wasm
+          path: wasm
+
+      # One version, one hash: the tag must be on main, name its commit's CONTRACT_VERSION and be
+      # the newest release. Creating the Release fails if one already exists for this tag.
+      - name: Check the tag
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME isn't on main"
+            exit 1
+          fi
+          version=$(sed -nE 's/^const CONTRACT_VERSION: &str = "([^"]+)";.*/\1/p' contracts/trading-account/src/lib.rs)
+          if [ "$GITHUB_REF_NAME" != "trading-account/v$version" ]; then
+            echo "::error::$GITHUB_REF_NAME doesn't match CONTRACT_VERSION $version"
+            exit 1
+          fi
+          newest=$(git tag -l 'trading-account/v*' --sort=-v:refname | head -1)
+          if [ "$newest" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::$newest is newer than $GITHUB_REF_NAME"
+            exit 1
+          fi
+
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          wasm=wasm/trading_account/trading_account.wasm
+          hex=$(sha256sum "$wasm" | cut -d' ' -f1)
+          # The bs58 form is what deploy-as-global prints and set_global_code_hash takes.
+          bs58=$(python3 -c '
+          import sys
+          digest = bytes.fromhex(sys.argv[1])
+          n = int.from_bytes(digest, "big")
+          alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+          out = ""
+          while n:
+              n, r = divmod(n, 58)
+              out = alphabet[r] + out
+          print("1" * (len(digest) - len(digest.lstrip(b"\0"))) + out)
+          ' "$hex")
+          gh release create "$GITHUB_REF_NAME" "$wasm" --verify-tag \
+            --title "Trading account ${GITHUB_REF_NAME#trading-account/v}" \
+            --notes "Built reproducibly from $GITHUB_SHA by run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID.
+
+          SHA-256 (hex): \`$hex\`
+          SHA-256 (bs58): \`$bs58\`"

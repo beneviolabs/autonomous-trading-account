@@ -6,7 +6,7 @@ How both contracts are built, and how new code reaches testnet and mainnet. Acco
 
 | | How | Deploy it? |
 |---|---|---|
-| Release | The `contract-wasm` artifact from CI, or `make release` locally | Yes. Only deploy these. |
+| Release | Trading account: its [GitHub Release](#versions). Factory: the `contract-wasm` artifact from CI. Or `make release` locally. | Yes. Only deploy these. |
 | Dev | `make build`, `contracts/*/build.sh` | No. Tests only. |
 
 Both write to `contracts/target/near/<crate>/<crate>.wasm`:
@@ -15,7 +15,7 @@ Both write to `contracts/target/near/<crate>/<crate>.wasm`:
 
 - **Release builds are reproducible.** They run `cargo near build reproducible-wasm` in NEAR's build image, pinned by digest under `[package.metadata.near.reproducible_build]` in each crate's `Cargo.toml`. The same commit gives the same hash on any machine. The wasm also records the repository, commit and build image (NEP-330), so explorers can verify it against the source.
 - **Get release wasm from CI.** The `contracts` workflow runs `make release`, prints each wasm's SHA-256 (hex and bs58) in its log, and uploads both wasms as the `contract-wasm` artifact, kept for 90 days.
-  - CI uploads the artifact only for pushes to `main` and for manual runs. Pull request and other branch runs build and test but don't upload.
+  - CI uploads the artifact only for pushes to `main`, release tags and manual runs. Pull request and other branch runs build and test but don't upload.
   - Mainnet releases come from `main`. A manual run on a branch (`gh workflow run contracts.yml --ref <branch>`) is for testnet rehearsals only.
   - CI runs on pull requests and on pushes to `main` that touch contract files. Otherwise, start a run with `gh workflow run contracts.yml --ref main`.
 - **`make release` locally** needs Docker and a clean tree with everything committed, including `Cargo.lock`. NEAR's build images are x86-only, so on Apple Silicon Docker emulates them and the build is slow. Use it to check a CI hash independently, not as the usual route.
@@ -43,12 +43,16 @@ The next release build will produce new hashes for both, even for unchanged code
 
 ## Versions
 
-The trading account reports `CONTRACT_VERSION` and `STATE_VERSION` from `contract_version()`. They're constants at the top of `contracts/trading-account/src/lib.rs`; the ft-core trading-account upgrades RFC says which to bump for which change.
+The trading account reports its version from `contract_version()`. The numbers are two constants at the top of `contracts/trading-account/src/lib.rs`:
+- `CONTRACT_VERSION`: bumped once per release. The ft-core trading-account upgrades RFC says whether it's a patch, minor or major bump.
+- `STATE_VERSION`: bumped only in the PR that changes the shape of the stored state. A unit test fails if the state changes without it.
 
-- **Each release is an annotated git tag**, `trading-account/vX.Y.Z` (the `CONTRACT_VERSION`), on the release commit. Its message carries the release wasm's hashes. See [Tag the release](#step-3-tag-the-release).
-- **The first change to the trading account after a release bumps `CONTRACT_VERSION`.** CI's `version` job fails a PR that changes the contract's code, `Cargo.toml`, `Cargo.lock` or the toolchain while `CONTRACT_VERSION` still equals the newest release tag. Test-only changes don't count. Bumping more than once between releases is fine; skipped numbers are never released.
-- **One version is one hash.** CI checks each release tag: it must name its commit's `CONTRACT_VERSION`, and the hash in its message must match the reproducible build of that commit.
-- **Released wasms aren't archived here.** Each one stays retrievable on chain by its hash (`view_global_contract_code`), and the tag maps its version to its commit and hash. The release-gate tests commit only the wasms they replay.
+**A release is a git tag**, `trading-account/v<CONTRACT_VERSION>`. Pushing the tag is what releases. CI then:
+1. runs the tests and the reproducible build of the tagged commit,
+2. checks the tag is on `main`, matches `CONTRACT_VERSION` in that commit and is the newest release tag,
+3. publishes a GitHub Release holding `trading_account.wasm` and its hashes.
+
+GitHub Releases are kept forever, unlike CI artifacts (90 days), so each release's wasm and hashes stay one click from its version. A version can't be released twice: a second Release for the same tag fails. Skipped version numbers are fine.
 
 ## Which release do I need?
 
@@ -64,7 +68,7 @@ Who's involved on mainnet: the factory owner is the DAO `peerfolio.sputnik-dao.n
 
 ## Get the release build
 
-Step 1 of both releases.
+Step 1 of a [factory release](#release-factory-code). Trading account releases come from their [GitHub Release](#versions) instead.
 
 1. Find the CI run for the commit you're releasing. Mainnet releases use a commit on `main`, from a run whose event is `push` or `workflow_dispatch`; check that it succeeded.
    ```bash
@@ -123,13 +127,28 @@ New trading account code goes out as a new global contract, and the factory is t
 
 Anyone with a funded account can deploy the global contract. On mainnet that's `peerfolio.near`, and it costs about 40 NEAR for storage; arrange funding or reimbursement first.
 
-### Step 1: Get the release build
+### Step 1: Release it on GitHub
 
-See [Get the release build](#get-the-release-build). Record the commit and the trading account's bs58 hash.
+1. Merge a PR that bumps `CONTRACT_VERSION` (see [Versions](#versions)).
+2. Tag the merge commit on `main` and push the tag:
+   ```bash
+   export VERSION=<new CONTRACT_VERSION>
+   git switch main && git pull
+   git tag trading-account/v$VERSION
+   git push origin trading-account/v$VERSION
+   ```
+3. Wait for the `contracts` run on the tag to finish. Its `release` job creates the GitHub Release. If it fails because the tag doesn't match `CONTRACT_VERSION`, delete the tag (`git push origin :refs/tags/trading-account/v$VERSION`), fix and tag again.
+4. Download the wasm, and check it against the hex hash in the Release notes:
+   ```bash
+   gh release download trading-account/v$VERSION -D contracts/target/near/trading_account --clobber
+   shasum -a 256 contracts/target/near/trading_account/trading_account.wasm
+   ```
+
+Use the Release's bs58 hash in the steps below.
 
 ### Step 2: Rehearse on testnet
 
-1. Deploy the global contract. The bs58 hash it prints should match step 1.
+1. Deploy the global contract. The bs58 hash it prints should match the Release's.
    ```bash
    near contract deploy-as-global use-file contracts/target/near/trading_account/trading_account.wasm as-global-hash peerfolio.testnet network-config testnet sign-with-keychain send
    ```
@@ -146,28 +165,15 @@ See [Get the release build](#get-the-release-build). Record the commit and the t
    3. `near account view-account-summary $TA network-config testnet now` shows the new hash, in hex, under `Global Contract`.
    4. Run through the rest of the [lifecycle](trading-account.md#lifecycle).
 
-### Step 3: Tag the release
+   If the rehearsal finds a problem, delete the GitHub Release (`gh release delete trading-account/v$VERSION`) but keep the tag, so the number isn't reused. Fix it and release the next version.
 
-Once the rehearsal passes, tag the release commit with its `CONTRACT_VERSION` and push the tag:
-
-```bash
-export VERSION=<CONTRACT_VERSION at $COMMIT>
-git tag -a trading-account/v$VERSION $COMMIT -m "trading-account $VERSION
-
-SHA-256 (hex): <hex hash>
-SHA-256 (bs58): <bs58 hash>"
-git push origin trading-account/v$VERSION
-```
-
-The tag push runs CI. Check its `build` job passes before going on: it fails if the tag doesn't match `CONTRACT_VERSION` at `$COMMIT`, or if its message doesn't carry that commit's hash.
-
-### Step 4: Deploy the global contract on mainnet
+### Step 3: Deploy the global contract on mainnet
 
 ```bash
 near contract deploy-as-global use-file contracts/target/near/trading_account/trading_account.wasm as-global-hash peerfolio.near network-config mainnet sign-with-keychain send
 ```
 
-### Step 5: Point the mainnet factory at it
+### Step 4: Point the mainnet factory at it
 
 Run a [DAO proposal](#dao-proposals) with:
 
@@ -176,7 +182,7 @@ export METHOD=set_global_code_hash
 export ARGS_JSON='{"code_hash_str":"<bs58 hash>"}'
 ```
 
-### Step 6: Verify on mainnet
+### Step 5: Verify on mainnet
 
 ```bash
 near contract call-function as-read-only auth.peerfolio.near get_proxy_code_base58_hash json-args '{}' network-config mainnet now
