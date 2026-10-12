@@ -5,7 +5,7 @@ The per-user contract, created by the [factory](factory.md) at `implicit_<24hex>
 ## Glossary
 
 - **Owner**: the user's NEAR account that controls the trading account.
-- **Agent**: an account the owner allows to request signatures, usually Peerfolio's bot `bot.peerfolio.near`. A trading account can have at most 10.
+- **Agent**: an account the owner allows to request signatures, usually Peerfolio's bot: `bot.peerfolio.near` in production, `bot.dev.peerfolio.near` in staging and local dev. A trading account can have at most 10.
 - **MPC signer**: the chain-signatures contract set by `signer_id`. It signs transactions for the trading account.
 - **Trading account**: this contract.
 
@@ -25,7 +25,7 @@ The per-user contract, created by the [factory](factory.md) at `implicit_<24hex>
 These commands use testnet and near-cli-rs (tested with 0.22). Variables:
 - `$OWNER`: a funded NEAR implicit account. To make one, run `near account create-account fund-later use-auto-generation save-to-folder <dir>` and send NEAR to the 64-hex ID it prints ([faucet](https://near-faucet.io/)).
 - `$OWNER_KEY`: the owner's key file, `<dir>/<id>.json`. Commands signed by the owner use `sign-with-access-key-file $OWNER_KEY`.
-- `$AGENT`: the agent. Peerfolio's mainnet agent is `bot.peerfolio.near`. There's no live testnet agent, so use any testnet account you control.
+- `$AGENT`: the agent. Peerfolio's mainnet agents are `bot.peerfolio.near` (production) and `bot.dev.peerfolio.near` (staging and local dev). There's no live testnet agent, so use any testnet account you control.
 - `$TA`: the trading account ID.
 
 1. **Create** the trading account. The owner must sign. Look up its name first:
@@ -92,6 +92,15 @@ Example transactions, from before the implicit-owner naming:
 - Testnet: [wrapping 1 NEAR](https://testnet.nearblocks.io/txns/Hi2pfe89tBdMN2oY2dFXLuHcSBVFotx6pHViDQuKUZDi), signed through [this `request_signature` call](https://testnet.nearblocks.io/txns/831u2KqbdtzvJti5HUhGnp4tZD7Q8onUzD11rwBjrAAm) (older API).
 - Mainnet: [adding a public key on `intents.near`](https://nearblocks.io/txns/GRw6oEWjAQ2QT9oDtsgBSRWr3s4oCW4A8zCpHCRXD62s), signed through [this request](https://nearblocks.io/txns/9PJXbvcb4RMxjwK8VW4N54RnvrjENUCr6N1nv9f3DZJQ).
 - Onboarding: [creating a trading account](https://testnet.nearblocks.io/txns/CF1ainGjroxtppNTWWkFgQsiC5kC4iJ3X7v8FgLMrWDE?tab=execution), [registering the MPC key](https://testnet.nearblocks.io/txns/5Jyn459DhAaRxEqvTo3x724cgxCpjTH1Jaoc7uyVNQt9).
+
+## Replacing an agent
+
+To move a trading account to a new agent, the owner:
+1. Adds the new agent's MPC key and the new agent, as in [Lifecycle](#lifecycle) steps 2 and 3 with `$AGENT` set to the new agent. The key differs per agent because the derivation path is the agent's account ID.
+2. Removes the old agent with `remove_agent`.
+3. Deletes the old agent's MPC key with `delete_key`. Until then, transactions the old agent already had signed stay valid until they expire, about 24 hours later.
+
+The owner can sign all of these as one transaction to the trading account. The trading account code deployed now (see the [README](../README.md#deployments)) predates the agent renames and `delete_key`: it uses `add_authorized_user` and `remove_authorized_user`, and the old MPC key can't be deleted. Removing the old agent still stops it requesting new signatures; what it already had signed stays valid until it expires.
 
 ## Deleting a trading account
 
