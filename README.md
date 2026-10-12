@@ -21,10 +21,12 @@ agent ──broadcast──▶ NEAR ──▶ intents.near mt_transfer (sent fro
 | Trading accounts | `implicit_<24hex>.auth.peerfolio.near` | `implicit_<24hex>.auth.peerfolio.testnet` |
 | Trading account code (global hash) | `6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f` | same |
 | MPC signer | `v1.signer` | `v1.signer-prod.testnet` |
-| Peerfolio agent | `bot.peerfolio.near` | none |
+| Peerfolio agent, production | `bot.peerfolio.near` | none |
+| Peerfolio agent, staging and local dev | `bot.dev.peerfolio.near` | none |
 
 - The previous mainnet factory, `auth-v1.peerfolio.near`, was replaced in January 2026.
 - ft-core configures the factory as `AUTH_CREATOR` / `VITE_AUTH_CREATOR_*`, and the agent as `AGENT_ACCOUNT_ID` / `VITE_AGENT_ACCOUNT_ID_*`. Its operational runbooks are in [`runbook/scenarios/automation_agent_account`](https://github.com/beneviolabs/ft-core/tree/main/runbook/scenarios/automation_agent_account).
+- No production trading account authorizes `bot.dev.peerfolio.near`, so its key can't reach them. Each agent's key is rotated with ft-core's [agent key runbook](https://github.com/beneviolabs/ft-core/blob/main/backend/docs/runbook-rotate-agent-key.md).
 
 ## Terms
 
