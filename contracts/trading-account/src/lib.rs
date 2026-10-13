@@ -38,7 +38,9 @@ mod utils;
 const GAS_FOR_REQUEST_SIGNATURE: Gas = Gas::from_tgas(100);
 const BASE_GAS: Gas = Gas::from_tgas(10); // Base gas for contract execution
 const CALLBACK_GAS: Gas = Gas::from_tgas(10); // Gas reserved for callback
-const MIGRATE_GAS: Gas = Gas::from_tgas(50); // migrate's budget; to be re-measured in the sandbox
+// migrate's budget. With 10 agents it burns about 3 Tgas (release-gate tests, 2026-10-08); the
+// rest is headroom for later migrations, which chain every version since the account's.
+const MIGRATE_GAS: Gas = Gas::from_tgas(50);
 const FACTORY_VIEW_GAS: Gas = Gas::from_tgas(5); // The factory's get_proxy_code_base58_hash
 const DO_UPGRADE_GAS: Gas = Gas::from_tgas(60); // do_upgrade's own work plus MIGRATE_GAS, which it hands on
 const NEAR_MPC_DOMAIN_ID: u32 = 0;
