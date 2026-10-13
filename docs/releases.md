@@ -36,7 +36,7 @@ Checked 2026-10-01:
 
 | | Hash | Built from |
 |---|---|---|
-| Trading account global code | `6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f` (hex `59136c3b557222ed2a30f8d02953ab50633566a49c4e107e2314f3a72c19b1f8`) | A native macOS build from before the repo reorg. It can't be reproduced. |
+| Trading account global code | `6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f` (hex `59136c3b557222ed2a30f8d02953ab50633566a49c4e107e2314f3a72c19b1f8`) | A native macOS build from before the repo reorg. It can't be reproduced, so the release-gate tests use a copy fetched from mainnet, `contracts/trading-account/res/v0.wasm`. |
 | Factory code, mainnet and testnet | hex `670ecb8001989c5dd36d8ff96f45bef138f3bac417134c67ac615768c57c4b40` | The old Docker CI build of `a26cd2f` (PR #166) |
 
 The next release build will produce new hashes for both, even for unchanged code, because crate names, paths, the lockfile and the build image all changed in the reorg.
