@@ -18,7 +18,7 @@ The per-user contract, created by the [factory](factory.md) at `implicit_<24hex>
 - **The owner isn't an agent** unless it adds itself, so it can't call `request_signature` by default.
 - **To cut off an agent at once**, remove it with `remove_agent` and delete the MPC key with `delete_key`. Removing the agent alone leaves transactions it already had signed valid until they expire, about 24 hours later. Deleting the key also stops all signing until the owner adds it back with `add_full_access_key`. Adding it back doesn't revive transactions signed before the deletion. The contract only signs nonces below the current block height × 1,000,000, and a re-added key starts above that.
 - **The trading account never broadcasts anything.** It returns a signed transaction, and the caller broadcasts it. The transaction runs from the trading account, so gas and attached deposits come out of its balance.
-- The allowlist is compiled in. Changing it means [releasing new trading account code](releases.md#release-trading-account-code), and existing trading accounts keep their old code.
+- The allowlist is compiled in. Changing it means [releasing new trading account code](releases.md#release-trading-account-code), and existing trading accounts keep their old code until their owner [upgrades them](#upgrading-a-trading-account).
 
 ## Lifecycle
 
@@ -100,7 +100,36 @@ To move a trading account to a new agent, the owner:
 2. Removes the old agent with `remove_agent`.
 3. Deletes the old agent's MPC key with `delete_key`. Until then, transactions the old agent already had signed stay valid until they expire, about 24 hours later.
 
-The owner can sign all of these as one transaction to the trading account. The trading account code deployed now (see the [README](../README.md#deployments)) predates the agent renames and `delete_key`: it uses `add_authorized_user` and `remove_authorized_user`, and the old MPC key can't be deleted. Removing the old agent still stops it requesting new signatures; what it already had signed stays valid until it expires.
+The owner can sign all of these as one transaction to the trading account. The trading account code deployed now (see the [README](../README.md#deployments)) predates the agent renames and `delete_key` until its owner [upgrades it](#upgrading-a-trading-account): it uses `add_authorized_user` and `remove_authorized_user`, and the old MPC key can't be deleted. Removing the old agent still stops it requesting new signatures; what it already had signed stays valid until it expires.
+
+## Upgrading a trading account
+
+A [release](releases.md#release-trading-account-code) changes only the code of trading accounts created afterwards. An existing account keeps its code until its owner upgrades it to the code the factory points at. The upgrade switches the code and runs `migrate` in one receipt, so if `migrate` fails the account keeps its old code and state. Agents, the owner, the signer and the MPC key carry over.
+
+Get the hash the factory points at, and check it matches the hash in the version's [GitHub Release](releases.md#versions):
+```bash
+near contract call-function as-read-only auth.peerfolio.testnet get_proxy_code_base58_hash json-args '{}' network-config testnet now
+```
+
+**From 1.0.0 onwards**, the owner calls `upgrade` with that hash. It fails if the factory points anywhere else by the time it runs:
+```bash
+near contract call-function as-transaction $TA upgrade json-args '{"expected_hash":"<bs58 hash>"}' prepaid-gas '100.0 Tgas' attached-deposit '1 yoctoNEAR' sign-as $OWNER network-config testnet sign-with-access-key-file $OWNER_KEY send
+```
+
+**From the original code (v0)**, which has no `upgrade` and no `contract_version`, the owner sends the same switch from the trading account itself, with a temporary key:
+1. As the owner, add your own public key to the trading account:
+   ```bash
+   near contract call-function as-transaction $TA add_full_access_key json-args '{"public_key":"<your public key>"}' prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' sign-as $OWNER network-config testnet sign-with-access-key-file $OWNER_KEY send
+   ```
+2. In one transaction signed with that key, switch to the hash, run `migrate` and delete the key. It prompts for the key pair you added in step 1. Nothing checks the hash for you here, so use the factory's. If `migrate` fails, the whole transaction reverts and the key is still there to retry with:
+   ```bash
+   near transaction construct-transaction $TA $TA add-action use-global-contract use-global-hash <bs58 hash> with-init-call migrate json-args '{}' prepaid-gas '50.0 Tgas' attached-deposit '0 NEAR' add-action delete-key '<your public key>' skip network-config testnet sign-with-plaintext-private-key send
+   ```
+
+Either way, check the result:
+- `near account view-account-summary $TA network-config testnet now` shows the new hash, in hex, under `Global Contract`, and only the keys the account had before.
+- `contract_version` returns the release's version, and `get_agents` returns the same agents as before.
+- The transaction logs a `migrated` event holding the account's state from before the upgrade.
 
 ## Deleting a trading account
 

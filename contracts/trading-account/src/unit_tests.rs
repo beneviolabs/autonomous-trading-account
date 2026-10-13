@@ -845,3 +845,331 @@ fn test_sign_request_callback_rejects_signer_failure() {
     let (mut contract, _, tx_json) = callback_setup();
     contract.sign_request_callback(Err(near_sdk::PromiseError::Failed), tx_json);
 }
+
+// ---- Versioned state and migrate ----
+
+/// A 64-character implicit account. Every v0 trading account is owned by one, so v0 state
+/// always starts with the byte 64 (the length of owner_id).
+fn implicit_owner() -> AccountId {
+    "0123456789abcdef".repeat(4).parse().unwrap()
+}
+
+/// v0's state layout, copied from the v0 source: no version byte, and the agents set was
+/// named authorized_users.
+#[derive(near_sdk::borsh::BorshSerialize)]
+#[borsh(crate = "near_sdk::borsh")]
+struct StateV0Fixture {
+    owner_id: AccountId,
+    authorized_users: near_sdk::collections::UnorderedSet<AccountId>,
+    signer_id: AccountId,
+}
+
+fn state_bytes(contract: &TradingAccountContract) -> Vec<u8> {
+    near_sdk::borsh::to_vec(contract).unwrap()
+}
+
+/// Writes v0 state with `agents` agents, as a v0 account stores it. Returns the STATE bytes.
+fn write_v0_state(agents: usize) -> Vec<u8> {
+    call_as(owner());
+    let mut authorized_users = near_sdk::collections::UnorderedSet::new(b"a");
+    for i in 0..agents {
+        authorized_users.insert(&user(i));
+    }
+    let raw = near_sdk::borsh::to_vec(&StateV0Fixture {
+        owner_id: implicit_owner(),
+        authorized_users,
+        signer_id: "v1.signer".parse().unwrap(),
+    })
+    .unwrap();
+    near_sdk::env::storage_write(b"STATE", &raw);
+    raw
+}
+
+/// Writes current-version state with `agents` agents. Returns the STATE bytes.
+fn write_current_state(agents: usize) -> Vec<u8> {
+    call_as(implicit_owner());
+    let mut contract = TradingAccountContract::new(implicit_owner(), "v1.signer".parse().unwrap());
+    for i in 0..agents {
+        contract.add_agent(user(i));
+    }
+    let raw = state_bytes(&contract);
+    near_sdk::env::storage_write(b"STATE", &raw);
+    raw
+}
+
+fn base64(bytes: &[u8]) -> String {
+    near_sdk::base64::Engine::encode(&near_sdk::base64::engine::general_purpose::STANDARD, bytes)
+}
+
+/// The one NEP-297 event logged since the last testing_env.
+fn logged_event() -> serde_json::Value {
+    let logs = near_sdk::test_utils::get_logs();
+    let events: Vec<&str> = logs
+        .iter()
+        .filter_map(|log| log.strip_prefix("EVENT_JSON:"))
+        .collect();
+    assert_eq!(
+        events.len(),
+        1,
+        "expected exactly one event, logs: {:?}",
+        logs
+    );
+    serde_json::from_str(events[0]).unwrap()
+}
+
+fn migrated_event(from: u8, raw: &[u8], agents: Vec<AccountId>) -> serde_json::Value {
+    serde_json::json!({
+        "standard": "trading_account",
+        "version": "1.0.0",
+        "event": "migrated",
+        "data": [{
+            "from_state_version": from,
+            "to_state_version": crate::STATE_VERSION,
+            "state": base64(raw),
+            "agents": agents,
+        }],
+    })
+}
+
+#[test]
+fn test_contract_version() {
+    assert_eq!(
+        serde_json::to_value(trading_account().contract_version()).unwrap(),
+        serde_json::json!({ "contract_version": "1.0.0", "state_version": 1 })
+    );
+}
+
+// A fixed fixture's STATE bytes. If this fails, the state's shape changed: bump STATE_VERSION,
+// add a migration from the old shape, and snapshot the new shape as schema/state_v{N}.hex.
+#[test]
+fn test_state_bytes_match_the_snapshot() {
+    assert_eq!(crate::STATE_VERSION, 1, "snapshot the new state version");
+    call_as(implicit_owner());
+    let mut contract = TradingAccountContract::new(implicit_owner(), "v1.signer".parse().unwrap());
+    contract.add_agent(user(0));
+    contract.add_agent(user(1));
+    assert_eq!(
+        hex::encode(state_bytes(&contract)),
+        include_str!("../schema/state_v1.hex").trim()
+    );
+}
+
+#[test]
+fn test_migrate_v0_keeps_owner_signer_and_agents() {
+    let raw = write_v0_state(10);
+    let mut contract = TradingAccountContract::migrate();
+
+    assert_eq!(contract.get_owner_id(), implicit_owner());
+    assert_eq!(contract.get_signer_id().as_str(), "v1.signer");
+    assert_eq!(contract.get_agents(), (0..10).map(user).collect::<Vec<_>>());
+    assert!(contract.is_agent(user(9)));
+    // The set is moved, not rebuilt: the new state is the version byte, then v0's bytes unchanged.
+    let migrated = state_bytes(&contract);
+    assert_eq!(migrated[0], crate::STATE_VERSION);
+    assert_eq!(&migrated[1..], &raw[..]);
+    // The owner still manages the migrated set.
+    call_as(implicit_owner());
+    contract.remove_agent(user(0));
+    assert!(!contract.is_agent(user(0)));
+}
+
+#[test]
+#[should_panic(expected = "Maximum number of agents reached")]
+fn test_migrate_v0_keeps_the_agent_count() {
+    write_v0_state(10);
+    let mut contract = TradingAccountContract::migrate();
+    call_as(implicit_owner());
+    contract.add_agent(user(10));
+}
+
+#[test]
+fn test_migrate_v0_logs_the_pre_migration_state_and_agents() {
+    let raw = write_v0_state(3);
+    let _ = TradingAccountContract::migrate();
+    // v0 has no version byte; the event reports it as state version 0.
+    assert_eq!(
+        logged_event(),
+        migrated_event(0, &raw, (0..3).map(user).collect())
+    );
+}
+
+#[test]
+fn test_migrate_at_current_version_leaves_state_unchanged() {
+    let raw = write_current_state(2);
+    let contract = TradingAccountContract::migrate();
+    assert_eq!(state_bytes(&contract), raw);
+    assert_eq!(
+        logged_event(),
+        migrated_event(crate::STATE_VERSION, &raw, vec![user(0), user(1)])
+    );
+}
+
+#[test]
+#[should_panic(expected = "downgrade not supported")]
+fn test_migrate_rejects_a_newer_state_version() {
+    let mut raw = write_current_state(0);
+    raw[0] = crate::STATE_VERSION + 1;
+    near_sdk::env::storage_write(b"STATE", &raw);
+    let _ = TradingAccountContract::migrate();
+}
+
+#[test]
+#[should_panic(expected = "unknown state version")]
+fn test_migrate_rejects_state_version_zero() {
+    let mut raw = write_current_state(0);
+    raw[0] = 0;
+    near_sdk::env::storage_write(b"STATE", &raw);
+    let _ = TradingAccountContract::migrate();
+}
+
+#[test]
+#[should_panic(expected = "no state to migrate")]
+fn test_migrate_without_state_panics() {
+    call_as(owner());
+    let _ = TradingAccountContract::migrate();
+}
+
+// ---- upgrade and do_upgrade ----
+
+/// The factory's current code hash in these tests.
+const LATEST_HASH: &str = "6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f";
+
+/// A trading account created by the auth.peerfolio.near factory.
+fn factory_created_account_id() -> AccountId {
+    "a1b2.auth.peerfolio.near".parse().unwrap()
+}
+
+/// Makes `caller` the predecessor of the next call on `factory_created_account_id()`, attaching
+/// `deposit` yoctoNEAR.
+fn call_on_factory_created_account(caller: AccountId, deposit: u128) {
+    let mut context = get_context(caller);
+    context
+        .current_account_id(factory_created_account_id())
+        .attached_deposit(NearToken::from_yoctonear(deposit));
+    testing_env!(context.build());
+}
+
+fn upgrade_as(caller: AccountId, deposit: u128) -> Promise {
+    let mut contract = trading_account_with_agent();
+    call_on_factory_created_account(caller, deposit);
+    contract.upgrade(LATEST_HASH.to_string())
+}
+
+fn do_upgrade(expected_hash: &str, latest: &str) -> Promise {
+    let contract = trading_account();
+    let account = factory_created_account_id();
+    call_on_factory_created_account(account, 0);
+    contract.do_upgrade(expected_hash.to_string(), latest.to_string())
+}
+
+#[test]
+fn test_upgrade_asks_its_factory_then_calls_do_upgrade() {
+    let receipts = receipts_of(upgrade_as(owner(), 1));
+
+    assert_eq!(receipts.len(), 2);
+    // The factory is the account's parent, never a caller-supplied account.
+    assert_eq!(receipts[0].receiver_id.as_str(), "auth.peerfolio.near");
+    let [
+        MockAction::FunctionCallWeight {
+            method_name,
+            attached_deposit,
+            ..
+        },
+    ] = &receipts[0].actions[..]
+    else {
+        panic!("unexpected actions: {:?}", receipts[0].actions);
+    };
+    assert_eq!(method_name, b"get_proxy_code_base58_hash");
+    assert_eq!(*attached_deposit, NearToken::from_yoctonear(0));
+
+    assert_eq!(receipts[1].receiver_id, factory_created_account_id());
+    assert_eq!(
+        receipts[1].receipt_indices,
+        vec![0],
+        "runs after the factory view"
+    );
+    let [
+        MockAction::FunctionCallWeight {
+            method_name,
+            args,
+            attached_deposit,
+            prepaid_gas,
+            ..
+        },
+    ] = &receipts[1].actions[..]
+    else {
+        panic!("unexpected actions: {:?}", receipts[1].actions);
+    };
+    assert_eq!(method_name, b"do_upgrade");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(args).unwrap(),
+        serde_json::json!({ "expected_hash": LATEST_HASH })
+    );
+    assert_eq!(*attached_deposit, NearToken::from_yoctonear(0));
+    // do_upgrade must have enough gas left to hand migrate its budget.
+    assert!(*prepaid_gas > crate::MIGRATE_GAS, "{:?}", prepaid_gas);
+}
+
+// One yoctoNEAR means the owner signed with a full-access key, not a function-call key.
+#[test]
+#[should_panic(expected = "Requires attached deposit of exactly 1 yoctoNEAR")]
+fn test_upgrade_requires_one_yocto() {
+    let _ = upgrade_as(owner(), 0);
+}
+
+#[test]
+#[should_panic(expected = "You have no power here. Only the owner can perform this action.")]
+fn test_upgrade_rejects_an_agent() {
+    let _ = upgrade_as(agent(), 1);
+}
+
+#[test]
+#[should_panic(expected = "You have no power here. Only the owner can perform this action.")]
+fn test_upgrade_rejects_a_stranger() {
+    let _ = upgrade_as(stranger(), 1);
+}
+
+// NEAR reverts a receipt only as a whole. Split across receipts (a .then), a failed migrate
+// would leave the swapped code running on unmigrated state.
+#[test]
+fn test_do_upgrade_switches_code_then_migrates_in_one_receipt() {
+    let receipts = receipts_of(do_upgrade(LATEST_HASH, LATEST_HASH));
+
+    assert_eq!(receipts.len(), 1);
+    assert_eq!(receipts[0].receiver_id, factory_created_account_id());
+    let [
+        use_global_contract,
+        MockAction::FunctionCallWeight {
+            method_name,
+            args,
+            attached_deposit,
+            prepaid_gas,
+            ..
+        },
+    ] = &receipts[0].actions[..]
+    else {
+        panic!("unexpected actions: {:?}", receipts[0].actions);
+    };
+    assert_eq!(
+        serde_json::to_value(use_global_contract).unwrap()["UseGlobalContract"]["contract_id"],
+        serde_json::json!({ "hash": LATEST_HASH })
+    );
+    assert_eq!(method_name, b"migrate");
+    assert!(args.is_empty());
+    assert_eq!(*attached_deposit, NearToken::from_yoctonear(0));
+    assert_eq!(*prepaid_gas, crate::MIGRATE_GAS);
+}
+
+// The signed expected_hash and the factory's pointer must agree, so moving either one alone
+// can't redirect an upgrade.
+#[test]
+#[should_panic(expected = "factory pointer does not match expected_hash")]
+fn test_do_upgrade_rejects_a_hash_the_factory_does_not_point_to() {
+    let _ = do_upgrade("11111111111111111111111111111111", LATEST_HASH);
+}
+
+#[test]
+#[should_panic(expected = "invalid code hash")]
+fn test_do_upgrade_rejects_an_invalid_hash() {
+    let _ = do_upgrade("not-a-hash", "not-a-hash");
+}

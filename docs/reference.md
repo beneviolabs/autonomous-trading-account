@@ -11,7 +11,7 @@ The public methods of both contracts, with who may call them and what isn't obvi
 | `create_proxy_global(owner_id)` *payable* | `owner_id` itself | Same, but with no minimum deposit and no refund. Don't call it directly. |
 | `get_base_account_name(owner_id)` | view | The `implicit_<24hex>` prefix for an owner. |
 | `verify_implicit_base_name(owner_id, base_name)` | view | Checks that a prefix belongs to an owner. |
-| `set_global_code_hash(code_hash_str)` | factory owner | bs58 hash. Affects trading accounts created afterwards only. |
+| `set_global_code_hash(code_hash_str)` | factory owner | bs58 hash. Trading accounts created afterwards get this code. Existing ones keep theirs, and `upgrade` can move them only to this hash. |
 | `add_full_access_key(public_key)` | factory owner | Adds a key to the factory account. |
 | `get_owner_id`, `get_signer_contract`, `get_proxy_code_base58_hash`, `get_proxy_code_hash_hex` | view | |
 
@@ -24,6 +24,10 @@ The public methods of both contracts, with who may call them and what isn't obvi
 | `remove_agent(account_id)` | owner | |
 | `is_agent(account_id)` | view | True only for agents. The owner isn't one unless it adds itself. |
 | `get_agents`, `get_owner_id`, `get_signer_id` | view | |
+| `contract_version` | view | `{"contract_version": "1.0.0", "state_version": 1}`: the versions compiled into the running code. |
+| `migrate` | the account itself (*private*) | Brings older stored state up to the current state version. Runs after a code swap. Logs a `migrated` event with the pre-migration state and agents. |
+| `upgrade(expected_hash)` *payable, exactly 1 yocto* | owner | Upgrades to the code hash the factory (the account's parent) points at. Fails unless the factory's hash equals `expected_hash`. Attach 100 Tgas. |
+| `do_upgrade(expected_hash)` | the account itself (*private*) | `upgrade`'s callback: switches to the global contract and runs `migrate` in one receipt. |
 | `set_signer_id(signer_id)` | owner | Changes the MPC signer contract. |
 | `request_signature(...)` *payable* | agents | See below. |
 | `add_full_access_key(public_key)` | owner | Registers the MPC key, or the owner's own key before deleting the account. |

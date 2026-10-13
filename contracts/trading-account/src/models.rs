@@ -31,3 +31,10 @@ pub struct SignRequest {
     pub path: String,
     pub domain_id: u32,
 }
+
+/// What contract_version returns.
+#[derive(Serialize)]
+pub struct ContractVersion {
+    pub contract_version: String,
+    pub state_version: u8,
+}

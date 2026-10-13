@@ -1,4 +1,5 @@
 use near_sdk::base64;
+use near_sdk::borsh::BorshDeserialize;
 use near_sdk::collections::UnorderedSet;
 
 use near_sdk::json_types::{Base58CryptoHash, U64};
@@ -37,17 +38,42 @@ mod utils;
 const GAS_FOR_REQUEST_SIGNATURE: Gas = Gas::from_tgas(100);
 const BASE_GAS: Gas = Gas::from_tgas(10); // Base gas for contract execution
 const CALLBACK_GAS: Gas = Gas::from_tgas(10); // Gas reserved for callback
+// migrate's budget. With 10 agents it burns about 3 Tgas (release-gate tests, 2026-10-08); the
+// rest is headroom for later migrations, which chain every version since the account's.
+const MIGRATE_GAS: Gas = Gas::from_tgas(50);
+const FACTORY_VIEW_GAS: Gas = Gas::from_tgas(5); // The factory's get_proxy_code_base58_hash
+const DO_UPGRADE_GAS: Gas = Gas::from_tgas(60); // do_upgrade's own work plus MIGRATE_GAS, which it hands on
 const NEAR_MPC_DOMAIN_ID: u32 = 0;
 const MAX_AGENTS: u64 = 10; // Maximum number of agents per trading account
 // NEAR accepts a transaction nonce only below block height * this multiplier (nearcore's name).
 const ACCESS_KEY_NONCE_RANGE_MULTIPLIER: u64 = 1_000_000;
 const NEAR_INTENTS_ADDRESS: &AccountIdRef = AccountIdRef::new_or_panic("intents.near");
+const CONTRACT_VERSION: &str = "1.0.0"; // Semver of the interface. Bumps every release.
+const STATE_VERSION: u8 = 1; // The shape of STATE. Bumps only when its Borsh bytes change.
+// v0 state has no version byte. Its first byte is the low byte of owner_id's length, and every
+// v0 owner is a 64-character implicit account.
+const V0_OWNER_LEN: u8 = 64;
+
+// migrate tells v0 state apart only while no state version can equal V0_OWNER_LEN. Remove the
+// v0 migration, and this assert, once no account runs v0.
+const _: () = assert!(STATE_VERSION < V0_OWNER_LEN);
 
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
 pub struct TradingAccountContract {
+    // Must stay first; migrate dispatches on this byte.
+    state_version: u8,
     owner_id: AccountId,
     agents: UnorderedSet<AccountId>,
+    signer_id: AccountId,
+}
+
+// v0's layout, kept only so migrate can read v0 state.
+#[derive(BorshDeserialize)]
+#[borsh(crate = "near_sdk::borsh")]
+struct StateV0 {
+    owner_id: AccountId,
+    authorized_users: UnorderedSet<AccountId>,
     signer_id: AccountId,
 }
 
@@ -69,10 +95,123 @@ impl TradingAccountContract {
         assert!(!env::state_exists(), "Contract is already initialized");
 
         Self {
+            state_version: STATE_VERSION,
             owner_id,
             agents: UnorderedSet::new(b"a"),
             signer_id,
         }
+    }
+
+    /// The versions compiled into the running code. migrate guarantees the stored state matches.
+    pub fn contract_version(&self) -> ContractVersion {
+        ContractVersion {
+            contract_version: CONTRACT_VERSION.into(),
+            state_version: STATE_VERSION,
+        }
+    }
+
+    /// Brings any older state up to STATE_VERSION. Runs in the same receipt as the code swap, so a
+    /// panic here reverts the swap too.
+    #[private]
+    #[init(ignore_state)]
+    pub fn migrate() -> Self {
+        let raw =
+            env::storage_read(b"STATE").unwrap_or_else(|| env::panic_str("no state to migrate"));
+        let (from_state_version, migrated, agents) = match raw[0] {
+            STATE_VERSION => {
+                let migrated = Self::try_from_slice(&raw)
+                    .unwrap_or_else(|_| env::panic_str("state unreadable"));
+                let agents = migrated.agents.to_vec();
+                (STATE_VERSION, migrated, agents)
+            }
+            // Must come before the downgrade guard, which would otherwise refuse v0 state.
+            V0_OWNER_LEN => {
+                let v0 = StateV0::try_from_slice(&raw)
+                    .unwrap_or_else(|_| env::panic_str("v0 unreadable"));
+                let agents = v0.authorized_users.to_vec();
+                // The set is moved, not rebuilt, so its prefix and stored agents don't change.
+                let migrated = Self {
+                    state_version: STATE_VERSION,
+                    owner_id: v0.owner_id,
+                    agents: v0.authorized_users,
+                    signer_id: v0.signer_id,
+                };
+                (0, migrated, agents)
+            }
+            v if v > STATE_VERSION => env::panic_str("downgrade not supported"),
+            _ => env::panic_str("unknown state version"),
+        };
+
+        assert_eq!(
+            migrated.state_version, STATE_VERSION,
+            "migration post-condition"
+        );
+        // NEP-297. Logs the agents too: they live under their own storage keys, so the STATE
+        // bytes alone couldn't restore a set a bad migration lost.
+        let event = serde_json::json!({
+            "standard": "trading_account",
+            "version": "1.0.0",
+            "event": "migrated",
+            "data": [{
+                "from_state_version": from_state_version,
+                "to_state_version": STATE_VERSION,
+                "state": base64::Engine::encode(
+                    &base64::engine::general_purpose::STANDARD,
+                    &raw,
+                ),
+                "agents": agents,
+            }],
+        });
+        env::log_str(&format!("EVENT_JSON:{}", event));
+
+        migrated
+    }
+
+    /// Upgrades this account to the code hash its factory points at. The owner passes the hash
+    /// they expect, so a pointer moved after they looked can't change what they sign.
+    #[payable]
+    pub fn upgrade(&mut self, expected_hash: String) -> Promise {
+        // One yocto means the owner signed with a full-access key, not a function-call key.
+        near_sdk::assert_one_yocto();
+        self.assert_owner();
+
+        // Every promise in this chain is returned. A dropped one would let the owner's
+        // transaction report success even when a later receipt fails.
+        Promise::new(Self::factory_id())
+            .function_call(
+                "get_proxy_code_base58_hash".to_string(),
+                vec![],
+                NearToken::from_near(0),
+                FACTORY_VIEW_GAS,
+            )
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(DO_UPGRADE_GAS)
+                    .do_upgrade(expected_hash),
+            )
+    }
+
+    // callback_unwrap, not callback_result: a failed factory view must fail the upgrade.
+    #[private]
+    pub fn do_upgrade(&self, expected_hash: String, #[callback_unwrap] latest: String) -> Promise {
+        assert_eq!(
+            latest, expected_hash,
+            "factory pointer does not match expected_hash"
+        );
+        let hash = Base58CryptoHash::try_from(latest.as_str())
+            .unwrap_or_else(|_| env::panic_str("invalid code hash"));
+
+        // One batch on this account: the code swap and migrate share a receipt, so a migrate
+        // panic reverts the swap. Don't chain migrate with .then: that is a second receipt, so
+        // the swap would commit on its own and leave the new code on unmigrated state.
+        Promise::new(env::current_account_id())
+            .use_global_contract(hash)
+            .function_call(
+                "migrate".to_string(),
+                vec![],
+                NearToken::from_near(0),
+                MIGRATE_GAS,
+            )
     }
 
     // Owner methods for managing agents
@@ -116,6 +255,15 @@ impl TradingAccountContract {
     }
 
     // Helper methods
+    // The factory only creates direct subaccounts, so the parent is the factory. Derived, never
+    // stored or taken from a caller.
+    fn factory_id() -> AccountId {
+        env::current_account_id()
+            .get_parent_account_id()
+            .map(AccountIdRef::to_owned)
+            .unwrap_or_else(|| env::panic_str("trading account has no parent factory"))
+    }
+
     fn assert_owner(&self) {
         assert_eq!(
             env::predecessor_account_id(),

@@ -6,7 +6,7 @@ How both contracts are built, and how new code reaches testnet and mainnet. Acco
 
 | | How | Deploy it? |
 |---|---|---|
-| Release | The `contract-wasm` artifact from CI, or `make release` locally | Yes. Only deploy these. |
+| Release | Trading account: its [GitHub Release](#versions). Factory: the `contract-wasm` artifact from CI. Or `make release` locally. | Yes. Only deploy these. |
 | Dev | `make build`, `contracts/*/build.sh` | No. Tests only. |
 
 Both write to `contracts/target/near/<crate>/<crate>.wasm`:
@@ -15,7 +15,7 @@ Both write to `contracts/target/near/<crate>/<crate>.wasm`:
 
 - **Release builds are reproducible.** They run `cargo near build reproducible-wasm` in NEAR's build image, pinned by digest under `[package.metadata.near.reproducible_build]` in each crate's `Cargo.toml`. The same commit gives the same hash on any machine. The wasm also records the repository, commit and build image (NEP-330), so explorers can verify it against the source.
 - **Get release wasm from CI.** The `contracts` workflow runs `make release`, prints each wasm's SHA-256 (hex and bs58) in its log, and uploads both wasms as the `contract-wasm` artifact, kept for 90 days.
-  - CI uploads the artifact only for pushes to `main` and for manual runs. Pull request and other branch runs build and test but don't upload.
+  - CI uploads the artifact only for pushes to `main`, release tags and manual runs. Pull request and other branch runs build and test but don't upload.
   - Mainnet releases come from `main`. A manual run on a branch (`gh workflow run contracts.yml --ref <branch>`) is for testnet rehearsals only.
   - CI runs on pull requests and on pushes to `main` that touch contract files. Otherwise, start a run with `gh workflow run contracts.yml --ref main`.
 - **`make release` locally** needs Docker and a clean tree with everything committed, including `Cargo.lock`. NEAR's build images are x86-only, so on Apple Silicon Docker emulates them and the build is slow. Use it to check a CI hash independently, not as the usual route.
@@ -36,26 +36,39 @@ Checked 2026-10-01:
 
 | | Hash | Built from |
 |---|---|---|
-| Trading account global code | `6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f` (hex `59136c3b557222ed2a30f8d02953ab50633566a49c4e107e2314f3a72c19b1f8`) | A native macOS build from before the repo reorg. It can't be reproduced. |
+| Trading account global code | `6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f` (hex `59136c3b557222ed2a30f8d02953ab50633566a49c4e107e2314f3a72c19b1f8`) | A native macOS build from before the repo reorg. It can't be reproduced, so the release-gate tests use a copy fetched from mainnet, `contracts/trading-account/res/v0.wasm`. |
 | Factory code, mainnet and testnet | hex `670ecb8001989c5dd36d8ff96f45bef138f3bac417134c67ac615768c57c4b40` | The old Docker CI build of `a26cd2f` (PR #166) |
 
 The next release build will produce new hashes for both, even for unchanged code, because crate names, paths, the lockfile and the build image all changed in the reorg.
+
+## Versions
+
+The trading account reports its version from `contract_version()`. The numbers are two constants at the top of `contracts/trading-account/src/lib.rs`:
+- `CONTRACT_VERSION`: bumped once per release. The ft-core trading-account upgrades RFC says whether it's a patch, minor or major bump.
+- `STATE_VERSION`: bumped only in the PR that changes the shape of the stored state. A unit test fails if the state changes without it.
+
+**A release is a git tag**, `trading-account/v<CONTRACT_VERSION>`. Pushing the tag is what releases. CI then:
+1. runs the tests and the reproducible build of the tagged commit,
+2. checks the tag is on `main`, matches `CONTRACT_VERSION` in that commit and is the newest release tag,
+3. publishes a GitHub Release holding `trading_account.wasm` and its hashes.
+
+GitHub Releases are kept forever, unlike CI artifacts (90 days), so each release's wasm and hashes stay one click from its version. A version can't be released twice: a second Release for the same tag fails. Skipped version numbers are fine.
 
 ## Which release do I need?
 
 | What changed | Procedure | Affects |
 |---|---|---|
-| Trading account code (`contracts/trading-account`) | [Release trading account code](#release-trading-account-code) | Trading accounts created afterwards. The factory code isn't touched. |
+| Trading account code (`contracts/trading-account`) | [Release trading account code](#release-trading-account-code) | Trading accounts created afterwards, and existing ones once their owner [upgrades](trading-account.md#upgrading-a-trading-account). The factory code isn't touched. |
 | Factory code (`contracts/factory`) | [Release factory code](#release-factory-code) | The factory only. It keeps its owner, MPC signer and trading account code hash. |
 | A new factory account is needed | [Deploy a new factory](factory.md#deploy-a-new-factory) | A new factory. Accounts created by the old one stay where they are. |
 
-Existing trading accounts are never changed by a release. They keep the code they were created with.
+A release never changes an existing trading account by itself. Each keeps its code until its owner [upgrades it](trading-account.md#upgrading-a-trading-account) to the hash the factory points at.
 
 Who's involved on mainnet: the factory owner is the DAO `peerfolio.sputnik-dao.near`, so every change to `auth.peerfolio.near` is a [DAO proposal](#dao-proposals). Proposals need 3 of 4 council approvals, and council members sign with their Ledger. On testnet, the factory owner `peerfolio.peerfolio.testnet` and the factory account `auth.peerfolio.testnet` sign directly from the keychain.
 
 ## Get the release build
 
-Step 1 of both releases.
+Step 1 of a [factory release](#release-factory-code). Trading account releases come from their [GitHub Release](#versions) instead.
 
 1. Find the CI run for the commit you're releasing. Mainnet releases use a commit on `main`, from a run whose event is `push` or `workflow_dispatch`; check that it succeeded.
    ```bash
@@ -114,13 +127,28 @@ New trading account code goes out as a new global contract, and the factory is t
 
 Anyone with a funded account can deploy the global contract. On mainnet that's `peerfolio.near`, and it costs about 40 NEAR for storage; arrange funding or reimbursement first.
 
-### Step 1: Get the release build
+### Step 1: Release it on GitHub
 
-See [Get the release build](#get-the-release-build). Record the commit and the trading account's bs58 hash.
+1. Merge a PR that bumps `CONTRACT_VERSION` (see [Versions](#versions)).
+2. Tag the merge commit on `main` and push the tag:
+   ```bash
+   export VERSION=<new CONTRACT_VERSION>
+   git switch main && git pull
+   git tag trading-account/v$VERSION
+   git push origin trading-account/v$VERSION
+   ```
+3. Wait for the `contracts` run on the tag to finish. Its `release` job creates the GitHub Release. If it fails because the tag doesn't match `CONTRACT_VERSION`, delete the tag (`git push origin :refs/tags/trading-account/v$VERSION`), fix and tag again.
+4. Download the wasm, and check it against the hex hash in the Release notes:
+   ```bash
+   gh release download trading-account/v$VERSION -D contracts/target/near/trading_account --clobber
+   shasum -a 256 contracts/target/near/trading_account/trading_account.wasm
+   ```
+
+Use the Release's bs58 hash in the steps below.
 
 ### Step 2: Rehearse on testnet
 
-1. Deploy the global contract. The bs58 hash it prints should match step 1.
+1. Deploy the global contract. The bs58 hash it prints should match the Release's.
    ```bash
    near contract deploy-as-global use-file contracts/target/near/trading_account/trading_account.wasm as-global-hash peerfolio.testnet network-config testnet sign-with-keychain send
    ```
@@ -136,6 +164,9 @@ See [Get the release build](#get-the-release-build). Record the commit and the t
    2. Create a new trading account ([lifecycle](trading-account.md#lifecycle) step 1).
    3. `near account view-account-summary $TA network-config testnet now` shows the new hash, in hex, under `Global Contract`.
    4. Run through the rest of the [lifecycle](trading-account.md#lifecycle).
+   5. [Upgrade](trading-account.md#upgrading-a-trading-account) a trading account created before step 2, with agents added, and check it.
+
+   If the rehearsal finds a problem, delete the GitHub Release (`gh release delete trading-account/v$VERSION`) but keep the tag, so the number isn't reused. Fix it and release the next version.
 
 ### Step 3: Deploy the global contract on mainnet
 
@@ -158,7 +189,7 @@ export ARGS_JSON='{"code_hash_str":"<bs58 hash>"}'
 near contract call-function as-read-only auth.peerfolio.near get_proxy_code_base58_hash json-args '{}' network-config mainnet now
 ```
 
-The next trading account created should show the new hex hash under `Global Contract` in `near account view-account-summary`. Then update the hash in the [README](../README.md#deployments) and in [What's deployed now](#whats-deployed-now).
+The next trading account created should show the new hex hash under `Global Contract` in `near account view-account-summary`. Existing accounts change only when their owners [upgrade](trading-account.md#upgrading-a-trading-account). Then update the hash in the [README](../README.md#deployments) and in [What's deployed now](#whats-deployed-now).
 
 ## Release factory code
 
