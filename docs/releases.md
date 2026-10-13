@@ -58,11 +58,11 @@ GitHub Releases are kept forever, unlike CI artifacts (90 days), so each release
 
 | What changed | Procedure | Affects |
 |---|---|---|
-| Trading account code (`contracts/trading-account`) | [Release trading account code](#release-trading-account-code) | Trading accounts created afterwards. The factory code isn't touched. |
+| Trading account code (`contracts/trading-account`) | [Release trading account code](#release-trading-account-code) | Trading accounts created afterwards, and existing ones once their owner [upgrades](trading-account.md#upgrading-a-trading-account). The factory code isn't touched. |
 | Factory code (`contracts/factory`) | [Release factory code](#release-factory-code) | The factory only. It keeps its owner, MPC signer and trading account code hash. |
 | A new factory account is needed | [Deploy a new factory](factory.md#deploy-a-new-factory) | A new factory. Accounts created by the old one stay where they are. |
 
-Existing trading accounts are never changed by a release. They keep the code they were created with.
+A release never changes an existing trading account by itself. Each keeps its code until its owner [upgrades it](trading-account.md#upgrading-a-trading-account) to the hash the factory points at.
 
 Who's involved on mainnet: the factory owner is the DAO `peerfolio.sputnik-dao.near`, so every change to `auth.peerfolio.near` is a [DAO proposal](#dao-proposals). Proposals need 3 of 4 council approvals, and council members sign with their Ledger. On testnet, the factory owner `peerfolio.peerfolio.testnet` and the factory account `auth.peerfolio.testnet` sign directly from the keychain.
 
@@ -164,6 +164,7 @@ Use the Release's bs58 hash in the steps below.
    2. Create a new trading account ([lifecycle](trading-account.md#lifecycle) step 1).
    3. `near account view-account-summary $TA network-config testnet now` shows the new hash, in hex, under `Global Contract`.
    4. Run through the rest of the [lifecycle](trading-account.md#lifecycle).
+   5. [Upgrade](trading-account.md#upgrading-a-trading-account) a trading account created before step 2, with agents added, and check it.
 
    If the rehearsal finds a problem, delete the GitHub Release (`gh release delete trading-account/v$VERSION`) but keep the tag, so the number isn't reused. Fix it and release the next version.
 
@@ -188,7 +189,7 @@ export ARGS_JSON='{"code_hash_str":"<bs58 hash>"}'
 near contract call-function as-read-only auth.peerfolio.near get_proxy_code_base58_hash json-args '{}' network-config mainnet now
 ```
 
-The next trading account created should show the new hex hash under `Global Contract` in `near account view-account-summary`. Then update the hash in the [README](../README.md#deployments) and in [What's deployed now](#whats-deployed-now).
+The next trading account created should show the new hex hash under `Global Contract` in `near account view-account-summary`. Existing accounts change only when their owners [upgrade](trading-account.md#upgrading-a-trading-account). Then update the hash in the [README](../README.md#deployments) and in [What's deployed now](#whats-deployed-now).
 
 ## Release factory code
 

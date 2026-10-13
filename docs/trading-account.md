@@ -18,7 +18,7 @@ The per-user contract, created by the [factory](factory.md) at `implicit_<24hex>
 - **The owner isn't an agent** unless it adds itself, so it can't call `request_signature` by default.
 - **To cut off an agent at once**, remove it with `remove_agent` and delete the MPC key with `delete_key`. Removing the agent alone leaves transactions it already had signed valid until they expire, about 24 hours later. Deleting the key also stops all signing until the owner adds it back with `add_full_access_key`. Adding it back doesn't revive transactions signed before the deletion. The contract only signs nonces below the current block height × 1,000,000, and a re-added key starts above that.
 - **The trading account never broadcasts anything.** It returns a signed transaction, and the caller broadcasts it. The transaction runs from the trading account, so gas and attached deposits come out of its balance.
-- The allowlist is compiled in. Changing it means [releasing new trading account code](releases.md#release-trading-account-code), and existing trading accounts keep their old code.
+- The allowlist is compiled in. Changing it means [releasing new trading account code](releases.md#release-trading-account-code), and existing trading accounts keep their old code until their owner [upgrades them](#upgrading-a-trading-account).
 
 ## Lifecycle
 
@@ -92,6 +92,35 @@ Example transactions, from before the implicit-owner naming:
 - Testnet: [wrapping 1 NEAR](https://testnet.nearblocks.io/txns/Hi2pfe89tBdMN2oY2dFXLuHcSBVFotx6pHViDQuKUZDi), signed through [this `request_signature` call](https://testnet.nearblocks.io/txns/831u2KqbdtzvJti5HUhGnp4tZD7Q8onUzD11rwBjrAAm) (older API).
 - Mainnet: [adding a public key on `intents.near`](https://nearblocks.io/txns/GRw6oEWjAQ2QT9oDtsgBSRWr3s4oCW4A8zCpHCRXD62s), signed through [this request](https://nearblocks.io/txns/9PJXbvcb4RMxjwK8VW4N54RnvrjENUCr6N1nv9f3DZJQ).
 - Onboarding: [creating a trading account](https://testnet.nearblocks.io/txns/CF1ainGjroxtppNTWWkFgQsiC5kC4iJ3X7v8FgLMrWDE?tab=execution), [registering the MPC key](https://testnet.nearblocks.io/txns/5Jyn459DhAaRxEqvTo3x724cgxCpjTH1Jaoc7uyVNQt9).
+
+## Upgrading a trading account
+
+A [release](releases.md#release-trading-account-code) changes only the code of trading accounts created afterwards. An existing account keeps its code until its owner upgrades it to the code the factory points at. The upgrade switches the code and runs `migrate` in one receipt, so if `migrate` fails the account keeps its old code and state. Agents, the owner, the signer and the MPC key carry over.
+
+Get the hash the factory points at, and check it matches the hash in the version's [GitHub Release](releases.md#versions):
+```bash
+near contract call-function as-read-only auth.peerfolio.testnet get_proxy_code_base58_hash json-args '{}' network-config testnet now
+```
+
+**From 1.0.0 onwards**, the owner calls `upgrade` with that hash. It fails if the factory points anywhere else by the time it runs:
+```bash
+near contract call-function as-transaction $TA upgrade json-args '{"expected_hash":"<bs58 hash>"}' prepaid-gas '100.0 Tgas' attached-deposit '1 yoctoNEAR' sign-as $OWNER network-config testnet sign-with-access-key-file $OWNER_KEY send
+```
+
+**From the original code (v0)**, which has no `upgrade` and no `contract_version`, the owner sends the same switch from the trading account itself, with a temporary key:
+1. As the owner, add your own public key to the trading account:
+   ```bash
+   near contract call-function as-transaction $TA add_full_access_key json-args '{"public_key":"<your public key>"}' prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' sign-as $OWNER network-config testnet sign-with-access-key-file $OWNER_KEY send
+   ```
+2. In one transaction signed with that key, switch to the hash, run `migrate` and delete the key. It prompts for the key pair you added in step 1. Nothing checks the hash for you here, so use the factory's. If `migrate` fails, the whole transaction reverts and the key is still there to retry with:
+   ```bash
+   near transaction construct-transaction $TA $TA add-action use-global-contract use-global-hash <bs58 hash> with-init-call migrate json-args '{}' prepaid-gas '50.0 Tgas' attached-deposit '0 NEAR' add-action delete-key '<your public key>' skip network-config testnet sign-with-plaintext-private-key send
+   ```
+
+Either way, check the result:
+- `near account view-account-summary $TA network-config testnet now` shows the new hash, in hex, under `Global Contract`, and only the keys the account had before.
+- `contract_version` returns the release's version, and `get_agents` returns the same agents as before.
+- The transaction logs a `migrated` event holding the account's state from before the upgrade.
 
 ## Deleting a trading account
 

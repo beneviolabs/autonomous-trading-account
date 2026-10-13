@@ -11,7 +11,7 @@ The public methods of both contracts, with who may call them and what isn't obvi
 | `create_proxy_global(owner_id)` *payable* | `owner_id` itself | Same, but with no minimum deposit and no refund. Don't call it directly. |
 | `get_base_account_name(owner_id)` | view | The `implicit_<24hex>` prefix for an owner. |
 | `verify_implicit_base_name(owner_id, base_name)` | view | Checks that a prefix belongs to an owner. |
-| `set_global_code_hash(code_hash_str)` | factory owner | bs58 hash. Affects trading accounts created afterwards only. |
+| `set_global_code_hash(code_hash_str)` | factory owner | bs58 hash. Trading accounts created afterwards get this code. Existing ones keep theirs, and `upgrade` can move them only to this hash. |
 | `add_full_access_key(public_key)` | factory owner | Adds a key to the factory account. |
 | `get_owner_id`, `get_signer_contract`, `get_proxy_code_base58_hash`, `get_proxy_code_hash_hex` | view | |
 
