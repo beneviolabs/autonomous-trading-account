@@ -106,7 +106,7 @@ The owner can sign all of these as one transaction to the trading account. The t
 
 A [release](releases.md#release-trading-account-code) changes only the code of trading accounts created afterwards. An existing account keeps its code until its owner upgrades it to the code the factory points at. The upgrade switches the code and runs `migrate` in one receipt, so if `migrate` fails the account keeps its old code and state. Agents, the owner, the signer and the MPC key carry over.
 
-Get the hash the account's own factory (its parent: `auth.peerfolio.near`, or `auth.dev.peerfolio.near` for dev accounts) points at, and check it matches the hash in the version's [GitHub Release](releases.md#versions):
+Get the hash the account's own factory (its parent) points at, and check it matches the hash in the version's [GitHub Release](releases.md#versions):
 ```bash
 near contract call-function as-read-only auth.peerfolio.testnet get_proxy_code_base58_hash json-args '{}' network-config testnet now
 ```
@@ -115,6 +115,8 @@ near contract call-function as-read-only auth.peerfolio.testnet get_proxy_code_b
 ```bash
 near contract call-function as-transaction $TA upgrade json-args '{"expected_hash":"<bs58 hash>"}' prepaid-gas '100.0 Tgas' attached-deposit '1 yoctoNEAR' sign-as $OWNER network-config testnet sign-with-access-key-file $OWNER_KEY send
 ```
+
+These commands are for testnet. On mainnet, use `network-config mainnet` and query the account's parent: `auth.peerfolio.near`, or `auth.dev.peerfolio.near` for dev accounts. `upgrade` checks the hash against its parent, so querying the other factory can make it fail.
 
 **From the original code (v0)**, which has no `upgrade` and no `contract_version`, the owner sends the same switch from the trading account itself, with a temporary key:
 1. As the owner, add your own public key to the trading account:

@@ -39,7 +39,7 @@ contracts/factory/deploy.sh peerfolio.sputnik-dao.near 6ziTqYXTX4ASca2dRmgPhVV84
 That's how the live mainnet factory was deployed. Run it with `peerfolio.peerfolio.testnet` and `testnet` first.
 
 - The factory ID defaults to `auth.peerfolio.<suffix>`, created from `peerfolio.<suffix>`. Set `FACTORY_ACCOUNT` and `ROOT_ACCOUNT` to use others, and keep the ID at most 30 characters.
-- `peerfolio.<near|testnet>`'s key has to be in your keychain. If that account uses a Ledger, temporarily add a keychain full-access key, run the script, then delete the key.
+- `ROOT_ACCOUNT`'s key (by default `peerfolio.<near|testnet>`'s) has to be in your keychain. If that account uses a Ledger, temporarily add a keychain full-access key, run the script, then delete the key.
 - The script uses near-cli-rs's legacy-compatible commands (`near deploy`, `near state`). In that syntax, `--deposit 1` means 1 NEAR, not 1 yoctoNEAR.
 - If the factory account already exists, the script only redeploys the code and ignores the owner and hash arguments. That doesn't work on mainnet, where the factory has no keys; use [Release factory code](releases.md#release-factory-code) instead.
 - The previous factory, `auth-v1.peerfolio.near`, was replaced in January 2026.
