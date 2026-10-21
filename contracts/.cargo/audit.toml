@@ -6,4 +6,10 @@ ignore = [
     # 5.29.1) pins aws-lc-rs =1.16.2, which caps rustls at 0.23.43. Remove once near-sdk moves to
     # near-crypto 0.38.
     "RUSTSEC-2026-0285",
+    # Same cause and same reach (test dependencies only), later rustls advisories fixed in 0.23.46 and
+    # the rustls-webpki fix (0.103.16) that comes with it. Remove with the one above.
+    "RUSTSEC-2026-0346",
+    "RUSTSEC-2026-0348",
+    "RUSTSEC-2026-0349",
+    "RUSTSEC-2026-0382",
 ]

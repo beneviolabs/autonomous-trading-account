@@ -20,7 +20,7 @@ agent ──broadcast──▶ NEAR ──▶ intents.near mt_transfer (sent fro
 | Factory owner | `peerfolio.sputnik-dao.near` (DAO) | `peerfolio.peerfolio.testnet` |
 | Dev factory | `auth.dev.peerfolio.near` | none |
 | Dev factory owner | `dev.peerfolio.near` (team key) | none |
-| Trading accounts | `implicit_<24hex>.auth.peerfolio.near` | `implicit_<24hex>.auth.peerfolio.testnet` |
+| Trading accounts | `implicit_<24hex>.auth.peerfolio.near`, or `implicit_<24hex>.auth.dev.peerfolio.near` from the dev factory | `implicit_<24hex>.auth.peerfolio.testnet` |
 | Trading account code (global hash) | `6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f` | same |
 | MPC signer | `v1.signer` | `v1.signer-prod.testnet` |
 | Peerfolio agent, production | `bot.peerfolio.near` | none |

@@ -116,7 +116,7 @@ near contract call-function as-read-only auth.peerfolio.testnet get_proxy_code_b
 near contract call-function as-transaction $TA upgrade json-args '{"expected_hash":"<bs58 hash>"}' prepaid-gas '100.0 Tgas' attached-deposit '1 yoctoNEAR' sign-as $OWNER network-config testnet sign-with-access-key-file $OWNER_KEY send
 ```
 
-These commands are for testnet. On mainnet, use `network-config mainnet` and query the account's parent: `auth.peerfolio.near`, or `auth.dev.peerfolio.near` for dev accounts. `upgrade` checks the hash against its parent, so querying the other factory can make it fail.
+These commands are for testnet. On mainnet, use `network-config mainnet` and query the account's parent, the factory its ID ends in: `auth.peerfolio.near`, or `auth.dev.peerfolio.near` for dev accounts created on the dev factory. Older dev accounts are on `auth.peerfolio.near`. `upgrade` checks the hash against its parent, so querying the other factory can make it fail.
 
 **From the original code (v0)**, which has no `upgrade` and no `contract_version`, the owner sends the same switch from the trading account itself, with a temporary key:
 1. As the owner, add your own public key to the trading account:
