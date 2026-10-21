@@ -18,6 +18,8 @@ agent ──broadcast──▶ NEAR ──▶ intents.near mt_transfer (sent fro
 |---|---|---|
 | Factory | `auth.peerfolio.near` | `auth.peerfolio.testnet` |
 | Factory owner | `peerfolio.sputnik-dao.near` (DAO) | `peerfolio.peerfolio.testnet` |
+| Dev factory | `auth.dev.peerfolio.near` | none |
+| Dev factory owner | `dev.peerfolio.near` (team key) | none |
 | Trading accounts | `implicit_<24hex>.auth.peerfolio.near` | `implicit_<24hex>.auth.peerfolio.testnet` |
 | Trading account code (global hash) | `6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f` | same |
 | MPC signer | `v1.signer` | `v1.signer-prod.testnet` |
@@ -25,8 +27,8 @@ agent ──broadcast──▶ NEAR ──▶ intents.near mt_transfer (sent fro
 | Peerfolio agent, staging and local dev | `bot.dev.peerfolio.near` | none |
 
 - The previous mainnet factory, `auth-v1.peerfolio.near`, was replaced in January 2026.
-- ft-core configures the factory as `AUTH_CREATOR` / `VITE_AUTH_CREATOR_*`, and the agent as `AGENT_ACCOUNT_ID` / `VITE_AGENT_ACCOUNT_ID_*`. Its operational runbooks are in [`runbook/scenarios/automation_agent_account`](https://github.com/beneviolabs/ft-core/tree/main/runbook/scenarios/automation_agent_account).
-- No production trading account authorizes `bot.dev.peerfolio.near`, so its key can't reach them. Each agent's key is rotated with ft-core's [agent key runbook](https://github.com/beneviolabs/ft-core/blob/main/backend/docs/runbook-rotate-agent-key.md).
+- The [dev factory](docs/factory.md#dev-factory) runs the same code as `auth.peerfolio.near` and points at the same globals. Peerfolio Backend's staging and local dev use it. Its pointer moves ahead of prod's, so a release is rehearsed there first.
+- No production trading account authorizes `bot.dev.peerfolio.near`, so its key can't reach them.
 
 ## Terms
 
@@ -65,4 +67,4 @@ The contracts form one Cargo workspace in `contracts/`, with a shared `Cargo.loc
 
 The contracts deployed at `*.peerfolio.near`, including the factory deployed in January 2026, have had independent third-party security reviews. All findings were remediated. Reports: [Peerfolio Security Audits](https://www.notion.so/Security-Audits-3037541592cc80709908c49fc7649260).
 
-Later changes aren't covered unless the reports say so. That includes the factory naming and owner checks from [PR #166](https://github.com/beneviolabs/autonomous-trading-account/pull/166), which came from an internal review, and the near-sdk 5.29 / omni-transaction 0.5 upgrade from [PR #168](https://github.com/beneviolabs/autonomous-trading-account/pull/168), which changes how the trading account builds the transactions it signs.
+Later changes aren't covered unless the reports say so.
