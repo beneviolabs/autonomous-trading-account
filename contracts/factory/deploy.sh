@@ -6,6 +6,10 @@
 # Example (how the live mainnet factory was deployed):
 #   ./deploy.sh peerfolio.sputnik-dao.near 6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f mainnet
 #
+# FACTORY_ACCOUNT and ROOT_ACCOUNT override the factory ID and the account that creates it,
+# for example the dev factory:
+#   FACTORY_ACCOUNT=auth.dev.peerfolio.near ROOT_ACCOUNT=dev.peerfolio.near ./deploy.sh dev.peerfolio.near <hash> mainnet
+#
 # - First deploy: creates the factory account from peerfolio.<suffix> and calls `new`.
 #   NETWORK must be "mainnet" or "testnet". Needs peerfolio.<suffix>'s key in your keychain;
 #   a Ledger-secured root account won't work, so temporarily add a keychain full-access key
@@ -49,8 +53,8 @@ else
     NETWORK_SUFFIX="testnet"
 fi
 
-FACTORY_ACCOUNT="auth.peerfolio.$NETWORK_SUFFIX"
-ROOT_ACCOUNT="peerfolio.$NETWORK_SUFFIX"
+FACTORY_ACCOUNT="${FACTORY_ACCOUNT:-auth.peerfolio.$NETWORK_SUFFIX}"
+ROOT_ACCOUNT="${ROOT_ACCOUNT:-peerfolio.$NETWORK_SUFFIX}"
 
 # Check if WASM file exists
 if [ ! -f "$WASM_PATH" ]; then

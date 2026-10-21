@@ -259,7 +259,7 @@ async fn request_signature_with_stub(
 
 // The full request_signature -> signer -> sign_request_callback path, with the minimum gas
 // the docs promise is enough. The real signer's signature format is only checked on testnet.
-// The deposits 1 and 10 are the pen test #8 case (ft-core#1700): the transaction JSON passed
+// The deposits 1 and 10 are the pen test #8 case: the transaction JSON passed
 // to the callback must carry both unchanged.
 #[tokio::test]
 async fn test_request_signature_with_stub_signer() -> Result<()> {
@@ -308,7 +308,7 @@ async fn broadcast(worker: &Worker<Sandbox>, signed_tx_base64: &str) -> Result<s
     Ok(serde_json::from_str(&response)?)
 }
 
-// Pen test findings #5 and #6 (ft-core#1791). A transaction the bot already had signed stays valid
+// Pen test findings #5 and #6. A transaction the bot already had signed stays valid
 // until it expires, about a day later, unless the MPC key is deleted. Two transactions are signed
 // up front. The first is the control: broadcasting it works while the key exists. After the owner
 // deletes the key, broadcasting the second fails with an unknown-key error, and adding the key
