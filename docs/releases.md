@@ -183,7 +183,7 @@ near contract call-function as-transaction auth.dev.peerfolio.near set_global_co
 near contract call-function as-read-only auth.dev.peerfolio.near get_proxy_code_base58_hash json-args '{}' network-config mainnet now
 ```
 
-Then rehearse in dev and release the app to prod, following Peerfolio Backend's [contract release runbook](https://github.com/beneviolabs/ft-core/blob/main/backend/docs/runbook-publish-contract-release.md). Skipping this step shows as a "not deployed yet" error on dev upgrades.
+Then rehearse in dev and release the app to prod, following Peerfolio Backend's contract release runbook. Skipping this step shows as a "not deployed yet" error on dev upgrades.
 
 If the dev rehearsal rejects the release, prod is untouched: release the next version, deploy its global and point the dev factory at it. If the release bumped `STATE_VERSION` to N and ran on any account, N's shape and migration are frozen, so a fix that changes them uses N+1. After a prod rollback, move the dev factory pointer back with prod's.
 

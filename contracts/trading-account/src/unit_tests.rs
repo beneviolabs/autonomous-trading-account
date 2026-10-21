@@ -180,7 +180,7 @@ fn test_set_signer_id_by_owner() {
 }
 
 // The signer decides what gets signed, so only the owner can change it. A bot that could repoint
-// it could have anything signed (pen test finding #7, ft-core#1696).
+// it could have anything signed (pen test finding #7).
 #[test]
 #[should_panic(expected = "You have no power here. Only the owner can perform this action.")]
 fn test_set_signer_id_rejects_agent() {
@@ -303,7 +303,7 @@ fn test_delete_key_by_owner() {
 }
 
 // Deleting the MPC key is the only way to invalidate transactions the bot already had signed
-// (pen test findings #5 and #6, ft-core#1791), and only the owner may do it.
+// (pen test findings #5 and #6), and only the owner may do it.
 #[test]
 #[should_panic(expected = "You have no power here. Only the owner can perform this action.")]
 fn test_delete_key_rejects_agent() {
@@ -379,7 +379,7 @@ fn test_request_signature_rejects_disallowed_call() {
 }
 
 // A bare Transfer sends NEAR straight out of the trading account. The bot never needs one, so
-// it's rejected even next to an allowed call (pen test finding #2, ft-core#1792).
+// it's rejected even next to an allowed call (pen test finding #2).
 #[test]
 #[should_panic(expected = "unknown variant `Transfer`, expected `FunctionCall`")]
 fn test_request_signature_rejects_transfer() {
@@ -486,7 +486,7 @@ fn test_validate_and_build_actions_builds_mt_transfer() {
     assert_eq!(call.deposit, NearToken::from_yoctonear(1));
 }
 
-// The bot only ever signs intents.near::mt_transfer (pen test finding #2, ft-core#1792). Everything
+// The bot only ever signs intents.near::mt_transfer (pen test finding #2). Everything
 // the allowlist used to permit is rejected, and so are names one typo or suffix away from it.
 #[test]
 fn test_validate_and_build_actions_rejects_everything_but_mt_transfer_on_intents() {
@@ -733,7 +733,7 @@ fn test_sign_request_callback_attaches_mpc_signature() {
 const OTHER_SECRET_KEY: [u8; 32] = [0x43; 32];
 
 // The callback only returns a transaction whose signature recovers to the transaction's own public
-// key, over that transaction's hash (pen test finding #7, ft-core#1696). Anything else would be
+// key, over that transaction's hash (pen test finding #7). Anything else would be
 // rejected at broadcast at best, so it's rejected here.
 #[test]
 #[should_panic(
@@ -792,7 +792,7 @@ fn test_sign_request_callback_rejects_malformed_big_r() {
     contract.sign_request_callback(Ok(response), tx_json);
 }
 
-// Pen test finding #8 (ft-core#1700): request_signature used to rewrite each deposit in the
+// Pen test finding #8: request_signature used to rewrite each deposit in the
 // callback JSON with a plain string replace, so a deposit whose digits start another's (1 and
 // 10, 5 and 500) could corrupt the JSON or change a deposit. Every deposit must reach the
 // signed transaction exactly as requested, including 0 and u128::MAX.
