@@ -205,6 +205,19 @@ async fn deploy_with_stub_signer(
     Ok((trading_account, signer, agent))
 }
 
+/// One mt_transfer to `receiver_id`. Without a quote, only the trading account or its owner can
+/// receive.
+fn mt_transfer_to(receiver_id: &str) -> String {
+    json!([{
+        "type": "FunctionCall",
+        "method_name": "mt_transfer",
+        "args": { "receiver_id": receiver_id, "token_id": "nep141:wrap.near", "amount": "1000" },
+        "gas": "30000000000000",
+        "deposit": "1",
+    }])
+    .to_string()
+}
+
 /// Has `agent` request a signature for `actions_json` sent to intents.near, with the stub primed
 /// to return the test MPC key's signature over the transaction the contract will build. Attaches
 /// the documented minimum of 100 Tgas. Returns the base64 signed transaction and the bytes it
@@ -217,7 +230,6 @@ async fn request_signature_with_stub(
     nonce: u64,
     block_hash: [u8; 32],
 ) -> Result<(String, Vec<u8>)> {
-    use crate::TradingAccountContract;
     use near_sdk::{json_types::Base58CryptoHash, test_utils::VMContextBuilder, testing_env};
 
     // The transaction the contract will build, signed with the test MPC key.
@@ -226,11 +238,7 @@ async fn request_signature_with_stub(
             .current_account_id(trading_account.id().as_str().parse()?)
             .build()
     );
-    let mock = TradingAccountContract::new(
-        trading_account.id().as_str().parse()?,
-        signer.id().as_str().parse()?,
-    );
-    let (tx, _) = test_support::unsigned_tx(&mock, "intents.near", actions_json, nonce, block_hash);
+    let (tx, _) = test_support::unsigned_tx("intents.near", actions_json, nonce, block_hash);
     let (response, expected_signed) = test_support::mpc_sign(&tx);
     signer
         .call("set_response")
@@ -259,22 +267,17 @@ async fn request_signature_with_stub(
 
 // The full request_signature -> signer -> sign_request_callback path, with the minimum gas
 // the docs promise is enough. The real signer's signature format is only checked on testnet.
-// The deposits 1 and 10 are the pen test #8 case: the transaction JSON passed
-// to the callback must carry both unchanged.
 #[tokio::test]
 async fn test_request_signature_with_stub_signer() -> Result<()> {
     let worker = near_workspaces::sandbox().await?;
     let (trading_account, signer, agent) = deploy_with_stub_signer(&worker).await?;
 
-    let actions_json = r#"[
-        {"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"alice.near","token_id":"nep141:wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"},
-        {"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"bob.near","token_id":"nep141:wrap.near","amount":"2000"},"gas":"30000000000000","deposit":"10"}
-    ]"#;
+    let actions_json = mt_transfer_to(trading_account.id().as_str());
     let (signed_base64, expected_signed) = request_signature_with_stub(
         &trading_account,
         &signer,
         &agent,
-        actions_json,
+        &actions_json,
         5,
         [0u8; 32],
     )
@@ -332,12 +335,12 @@ async fn test_delete_key_invalidates_signed_transactions() -> Result<()> {
     let block = worker.view_block().await?;
     let block_hash = block.hash().0;
 
-    let actions_json = r#"[{"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"alice.near","token_id":"nep141:wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"}]"#;
+    let actions_json = mt_transfer_to(trading_account.id().as_str());
     let (control, _) = request_signature_with_stub(
         &trading_account,
         &signer,
         &agent,
-        actions_json,
+        &actions_json,
         nonce + 1,
         block_hash,
     )
@@ -346,7 +349,7 @@ async fn test_delete_key_invalidates_signed_transactions() -> Result<()> {
         &trading_account,
         &signer,
         &agent,
-        actions_json,
+        &actions_json,
         // The highest nonce the contract signs at this height.
         block.height() * 1_000_000 - 1,
         block_hash,
@@ -873,7 +876,7 @@ async fn assert_upgraded_intact(
         ta,
         &account.signer,
         agent,
-        r#"[{"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"alice.near","token_id":"nep141:wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"}]"#,
+        &mt_transfer_to(ta.id().as_str()),
         1,
         [0u8; 32],
     )
@@ -1012,4 +1015,53 @@ async fn test_upgrade_keeps_owner_signer_and_agents() -> Result<()> {
         assert_eq!(account.trading_account.view_state().await?, state);
     }
     assert_upgraded_intact(&account, &agent, &agents).await
+}
+
+// The real 1Click quote from the unit tests, through the real host's ed25519_verify. Its
+// recipient is a mainnet account the sandbox can't have, so the call verifies the signature,
+// parses the payload and then fails the recipient check. That failure is the pass condition: a
+// bad signature would fail earlier with its own message. Its gas shows what quote checking adds.
+#[tokio::test]
+async fn test_request_signature_verifies_a_real_quote() -> Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let (trading_account, _signer, agent) = deploy_with_stub_signer(&worker).await?;
+    let quote: crate::SignedQuote =
+        serde_json::from_str(include_str!("../res/one_click_quote.json"))?;
+    let payload: serde_json::Value = serde_json::from_str(&quote.payload)?;
+    let actions_json = mt_transfer_to(payload["depositAddress"].as_str().unwrap());
+
+    let outcome = agent
+        .call(trading_account.id(), "request_signature")
+        .args_json(json!({
+            "contract_id": "intents.near",
+            "actions_json": actions_json,
+            "nonce": "1",
+            "block_hash": "11111111111111111111111111111111",
+            "mpc_signer_pk": test_support::mpc_public_key(),
+            "derivation_path": trading_account.id(),
+            "quote": quote,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+
+    assert!(outcome.is_failure());
+    let failures = format!("{:?}", outcome.failures());
+    assert!(
+        failures.contains("Quote recipient implicit_2dde80947980ec0aa6242405.auth.peerfolio.near is not the trading account or its owner"),
+        "{}",
+        failures
+    );
+    let burnt = outcome.total_gas_burnt;
+    println!(
+        "request_signature up to the quote's recipient check: {} Tgas",
+        burnt.as_tgas()
+    );
+    assert!(
+        burnt < Gas::from_tgas(10),
+        "quote checking burnt {} Tgas",
+        burnt.as_tgas()
+    );
+    Ok(())
 }

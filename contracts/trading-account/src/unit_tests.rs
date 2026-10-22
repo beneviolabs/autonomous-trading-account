@@ -1,4 +1,5 @@
-use crate::{ActionString, TradingAccountContract, test_support};
+use crate::quote::{self, QuoteTerms};
+use crate::{ActionString, SignedQuote, TradingAccountContract, test_support};
 use near_sdk::json_types::{Base58CryptoHash, U64};
 use near_sdk::mock::{MockAction, Receipt};
 use near_sdk::test_utils::{VMContextBuilder, accounts, get_created_receipts};
@@ -10,7 +11,8 @@ use omni_transaction::near::utils::PublicKeyStrExt;
 
 const PUBLIC_KEY: &str = "ed25519:11111111111111111111111111111111";
 
-/// One `mt_transfer` on `intents.near`, the only call the allowlist permits.
+/// One `mt_transfer` on `intents.near`, the only call the allowlist permits, to `alice.near`: the
+/// mocked chain's current account, so the trading account itself.
 const MT_TRANSFER: &str = r#"[{"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"alice.near","token_id":"nep141:wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"}]"#;
 
 fn owner() -> AccountId {
@@ -78,6 +80,17 @@ fn request_signature_with_nonce(
     actions_json: &str,
     nonce: u64,
 ) -> Promise {
+    request_signature_with(contract, caller, contract_id, actions_json, nonce, None)
+}
+
+fn request_signature_with(
+    contract: &mut TradingAccountContract,
+    caller: AccountId,
+    contract_id: &str,
+    actions_json: &str,
+    nonce: u64,
+    quote: Option<SignedQuote>,
+) -> Promise {
     call_as(caller);
     contract.request_signature(
         contract_id.parse().unwrap(),
@@ -86,13 +99,22 @@ fn request_signature_with_nonce(
         Base58CryptoHash::from([0u8; 32]),
         test_support::mpc_public_key(),
         "trading-account.near".to_string(),
+        quote,
     )
 }
 
-/// validate_and_build_actions for `actions_json` sent to `contract_id`.
+/// validate_and_build_actions for `actions_json` sent to `contract_id`, with no quote.
 fn build_actions(contract_id: &str, actions_json: &str) -> Result<Vec<OmniAction>, String> {
+    build_actions_with(contract_id, actions_json, None)
+}
+
+fn build_actions_with(
+    contract_id: &str,
+    actions_json: &str,
+    quote: Option<&QuoteTerms>,
+) -> Result<Vec<OmniAction>, String> {
     let actions: Vec<ActionString> = serde_json::from_str(actions_json).unwrap();
-    trading_account().validate_and_build_actions(actions, &contract_id.parse().unwrap())
+    trading_account().validate_and_build_actions(actions, &contract_id.parse().unwrap(), quote)
 }
 
 /// The receipts `promise` schedules. A promise is only scheduled when it's dropped.
@@ -537,22 +559,18 @@ fn test_validate_and_build_actions_rejects_everything_but_mt_transfer_on_intents
     }
 }
 
-// One disallowed call fails the whole request, not just that action.
+// One action per transaction, so a quote authorizes exactly one transfer.
 #[test]
-fn test_validate_and_build_actions_rejects_batch_with_one_disallowed_call() {
-    let error = build_actions(
-        "intents.near",
-        r#"[
-            {"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"alice.near","token_id":"nep141:wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"},
-            {"type":"FunctionCall","method_name":"ft_withdraw","args":{"receiver_id":"alice.near","token":"wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"}
-        ]"#,
-    )
-    .unwrap_err();
-    assert!(
-        error.contains("ft_withdraw on intents.near is not allowed"),
-        "{}",
-        error
-    );
+fn test_validate_and_build_actions_rejects_anything_but_one_action() {
+    let one = &MT_TRANSFER[1..MT_TRANSFER.len() - 1];
+    for (actions_json, count) in [("[]".to_string(), 0), (format!("[{},{}]", one, one), 2)] {
+        let error = build_actions("intents.near", &actions_json).unwrap_err();
+        assert!(
+            error.contains(&format!("Exactly one action is required. Got: {}", count)),
+            "{}",
+            error
+        );
+    }
 }
 
 #[test]
@@ -573,12 +591,6 @@ fn test_validate_and_build_actions_rejects_invalid_deposit() {
     )
     .unwrap_err();
     assert!(error.contains("Invalid deposit format"), "{}", error);
-}
-
-#[test]
-fn test_validate_and_build_actions_rejects_empty_actions() {
-    let error = build_actions("intents.near", "[]").unwrap_err();
-    assert!(error.contains("Actions cannot be empty"), "{}", error);
 }
 
 // The payload is sha256 of the transaction's borsh bytes, computed outside the contract.
@@ -707,7 +719,7 @@ fn callback_setup_with(
     );
     testing_env!(context.build());
     let contract = TradingAccountContract::new(accounts(1), "v1.signer".parse().unwrap());
-    let (tx, tx_json) = test_support::unsigned_tx(&contract, receiver, actions_json, 7, [9u8; 32]);
+    let (tx, tx_json) = test_support::unsigned_tx(receiver, actions_json, 7, [9u8; 32]);
     (contract, tx, tx_json)
 }
 
@@ -1172,4 +1184,378 @@ fn test_do_upgrade_rejects_a_hash_the_factory_does_not_point_to() {
 #[should_panic(expected = "invalid code hash")]
 fn test_do_upgrade_rejects_an_invalid_hash() {
     let _ = do_upgrade("not-a-hash", "not-a-hash");
+}
+
+// --- Outflows: where an mt_transfer may send funds ---
+
+/// The trading account in these tests: the mocked chain's current account.
+fn trading_account_id() -> AccountId {
+    // VMContextBuilder's default, not accounts(0), which is "alice".
+    "alice.near".parse().unwrap()
+}
+
+/// The accounts funds may go to without a quote.
+fn ours() -> [AccountId; 2] {
+    [trading_account_id(), owner()]
+}
+
+const DEPOSIT_ADDRESS: &str = "101823db08284897878219787860f301b04e4e8e51689387b1c395fb73e99ef5";
+
+/// Signs quotes in place of 1Click.
+fn test_quote_key() -> near_crypto::SecretKey {
+    near_crypto::SecretKey::from_seed(near_crypto::KeyType::ED25519, "1click")
+}
+
+fn test_quote_keys() -> [[u8; 32]; 1] {
+    [test_quote_key().public_key().key_data().try_into().unwrap()]
+}
+
+/// A live quote's signed payload, paying out and refunding to the trading account. `changes`
+/// overrides fields; a null removes one. serde_json sorts keys, as 1Click's SDK does.
+fn quote_payload(changes: serde_json::Value) -> String {
+    let mut payload = serde_json::json!({
+        "amount": "20000000000000000000000",
+        "amountIn": "20000000000000000000000",
+        "amountOut": "98641",
+        "deadline": "2026-10-25T16:21:59.865Z",
+        "depositAddress": DEPOSIT_ADDRESS,
+        "depositType": "INTENTS",
+        "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+        "dry": false,
+        "minAmountOut": "97654",
+        "originAsset": "nep141:wrap.near",
+        "recipient": "alice.near",
+        "recipientType": "INTENTS",
+        "refundTo": "alice.near",
+        "refundType": "INTENTS",
+        "slippageTolerance": 100,
+        "swapType": "EXACT_INPUT",
+        "timestamp": "2026-10-22T16:07:00.045Z",
+    });
+    for (key, value) in changes.as_object().unwrap() {
+        if value.is_null() {
+            payload.as_object_mut().unwrap().remove(key);
+        } else {
+            payload[key] = value.clone();
+        }
+    }
+    payload.to_string()
+}
+
+/// `payload` signed the way 1Click signs: the base58 text of its SHA-256.
+fn sign_quote(payload: &str) -> SignedQuote {
+    let message =
+        near_sdk::bs58::encode(crate::utils::hash_payload(payload.as_bytes())).into_string();
+    SignedQuote {
+        payload: payload.to_string(),
+        signature: test_quote_key().sign(message.as_bytes()).to_string(),
+    }
+}
+
+/// The checked terms of a test-signed quote.
+fn quote_terms(changes: serde_json::Value) -> QuoteTerms {
+    quote::verify(&sign_quote(&quote_payload(changes)), &test_quote_keys()).unwrap()
+}
+
+/// validate_and_build_actions' outflow check for one mt_transfer with `args` and `deposit`.
+fn outflow(
+    args: serde_json::Value,
+    deposit: &str,
+    quote: Option<&QuoteTerms>,
+) -> Result<(), String> {
+    let actions_json = serde_json::json!([{
+        "type": "FunctionCall",
+        "method_name": "mt_transfer",
+        "args": args,
+        "gas": "30000000000000",
+        "deposit": deposit,
+    }])
+    .to_string();
+    build_actions_with("intents.near", &actions_json, quote).map(drop)
+}
+
+fn transfer_to(receiver_id: &str) -> serde_json::Value {
+    serde_json::json!({"receiver_id": receiver_id, "token_id": "nep141:wrap.near", "amount": "1000"})
+}
+
+// A live quote 1Click returned on 2026-10-22: its signature, and the payload Peerfolio Backend's
+// build_signed_payload flattens it to. It proves the contract hashes and verifies exactly as
+// 1Click's SDK does, with the compiled-in key.
+/// The real quote's recipient and refundTo.
+const REAL_QUOTE_ACCOUNT: &str = "implicit_2dde80947980ec0aa6242405.auth.peerfolio.near";
+
+fn real_quote() -> SignedQuote {
+    serde_json::from_str(include_str!("../res/one_click_quote.json")).unwrap()
+}
+
+#[test]
+fn test_manager_key_is_the_one_in_1clicks_sdk() {
+    let sdk_key = near_sdk::bs58::decode("reYaWhvwu8Jzo3WUM3zhn6VrhuMEF4eADL17qtRVifc")
+        .into_vec()
+        .unwrap();
+    assert_eq!(quote::ONE_CLICK_MANAGER_KEYS, [sdk_key.as_slice()]);
+}
+
+#[test]
+fn test_verify_accepts_a_real_1click_quote() {
+    let terms = quote::verify(&real_quote(), quote::ONE_CLICK_MANAGER_KEYS).unwrap();
+    assert_eq!(terms.recipient, REAL_QUOTE_ACCOUNT);
+    assert_eq!(terms.deposit_address.as_deref(), Some(DEPOSIT_ADDRESS));
+}
+
+#[test]
+fn test_verify_rejects_a_tampered_real_quote() {
+    let mut quote = real_quote();
+    quote.payload = quote.payload.replace(REAL_QUOTE_ACCOUNT, "attacker.near");
+    let error = quote::verify(&quote, quote::ONE_CLICK_MANAGER_KEYS).unwrap_err();
+    assert!(error.contains("not signed by 1Click"), "{}", error);
+}
+
+#[test]
+fn test_verify_rejects_a_malformed_signature() {
+    for signature in [
+        real_quote().signature.trim_start_matches("ed25519:"),
+        "secp256k1:2EgRQHTMiMv7UR6z6Tt89CENpuEfD9DpsAKPUqu5aKKSQt4MXFDL5GRDFrRSmk9QLCvQFrxKNLedvKShHBzE2VJn",
+        "ed25519:0OIl",
+        "ed25519:11111111",
+    ] {
+        let quote = SignedQuote {
+            payload: real_quote().payload,
+            signature: signature.to_string(),
+        };
+        let error = quote::verify(&quote, quote::ONE_CLICK_MANAGER_KEYS).unwrap_err();
+        assert!(
+            error.contains("Invalid quote signature: expected"),
+            "{}",
+            error
+        );
+    }
+}
+
+// A signed payload with two `recipient` keys must not parse, whichever one a parser would keep.
+#[test]
+fn test_verify_rejects_duplicate_keys() {
+    let payload = quote_payload(serde_json::json!({})).replacen(
+        r#""recipient":"alice.near""#,
+        r#""recipient":"alice.near","recipient":"attacker.near""#,
+        1,
+    );
+    let error = quote::verify(&sign_quote(&payload), &test_quote_keys()).unwrap_err();
+    assert!(error.contains("duplicate field `recipient`"), "{}", error);
+}
+
+#[test]
+fn test_outflow_without_quote_allows_the_trading_account_and_owner() {
+    for receiver in ours() {
+        outflow(transfer_to(receiver.as_str()), "1", None).unwrap();
+    }
+}
+
+// The stolen-bot-key case: without a quote, funds can't leave for anyone else.
+#[test]
+fn test_outflow_without_quote_rejects_other_receivers() {
+    for receiver in [
+        "attacker.near",
+        DEPOSIT_ADDRESS,
+        "alice.near.attacker.near",
+        "bob.near",
+    ] {
+        let error = outflow(transfer_to(receiver), "1", None).unwrap_err();
+        assert!(
+            error.contains("is not the trading account or its owner"),
+            "{}",
+            error
+        );
+    }
+}
+
+#[test]
+fn test_outflow_accepts_every_mt_transfer_argument() {
+    let mut args = transfer_to("alice.near");
+    args["approval"] = serde_json::json!(null);
+    args["memo"] = serde_json::json!("note");
+    outflow(args, "1", None).unwrap();
+}
+
+// An argument intents.near adds later could redirect funds, so it needs a release first.
+#[test]
+fn test_outflow_rejects_unknown_arguments() {
+    for key in ["msg", "receiver", "recipient"] {
+        let mut args = transfer_to("alice.near");
+        args[key] = serde_json::json!("attacker.near");
+        let error = outflow(args, "1", None).unwrap_err();
+        assert!(error.contains("unknown field"), "{}", error);
+    }
+}
+
+#[test]
+fn test_outflow_rejects_missing_receiver() {
+    let error = outflow(
+        serde_json::json!({"token_id": "nep141:wrap.near", "amount": "1000"}),
+        "1",
+        None,
+    )
+    .unwrap_err();
+    assert!(error.contains("missing field `receiver_id`"), "{}", error);
+}
+
+#[test]
+fn test_outflow_requires_one_yocto() {
+    for deposit in ["0", "2", "1000000000000000000000000"] {
+        let error = outflow(transfer_to("alice.near"), deposit, None).unwrap_err();
+        assert!(error.contains("exactly 1 yoctoNEAR"), "{}", error);
+    }
+}
+
+#[test]
+fn test_outflow_with_quote_allows_its_deposit_address() {
+    let terms = quote_terms(serde_json::json!({}));
+    outflow(transfer_to(DEPOSIT_ADDRESS), "1", Some(&terms)).unwrap();
+}
+
+// A liquidation pays out to the owner while refunds come back to the trading account.
+#[test]
+fn test_outflow_with_quote_allows_the_owner_as_recipient_and_refund() {
+    for field in ["recipient", "refundTo"] {
+        let terms = quote_terms(serde_json::json!({ field: owner().as_str() }));
+        outflow(transfer_to(DEPOSIT_ADDRESS), "1", Some(&terms)).unwrap();
+    }
+}
+
+#[test]
+fn test_outflow_with_quote_rejects_another_receiver() {
+    let terms = quote_terms(serde_json::json!({}));
+    for receiver in ["attacker.near", "alice.near"] {
+        let error = outflow(transfer_to(receiver), "1", Some(&terms)).unwrap_err();
+        assert!(
+            error.contains("is not the quote's depositAddress"),
+            "{}",
+            error
+        );
+    }
+}
+
+#[test]
+fn test_outflow_with_quote_rejects_another_token() {
+    let terms = quote_terms(serde_json::json!({}));
+    let mut args = transfer_to(DEPOSIT_ADDRESS);
+    args["token_id"] = serde_json::json!("nep141:usdc.near");
+    let error = outflow(args, "1", Some(&terms)).unwrap_err();
+    assert!(
+        error.contains("is not the quote's originAsset"),
+        "{}",
+        error
+    );
+}
+
+#[test]
+fn test_outflow_accepts_the_maximum_slippage() {
+    let terms = quote_terms(serde_json::json!({ "slippageTolerance": quote::MAX_SLIPPAGE_BPS }));
+    outflow(transfer_to(DEPOSIT_ADDRESS), "1", Some(&terms)).unwrap();
+}
+
+// Each quote term that would send funds, or their refund, anywhere but back to the user.
+#[test]
+fn test_outflow_rejects_quotes_that_pay_out_elsewhere() {
+    let cases = [
+        (serde_json::json!({"dry": true}), "dry quote"),
+        (
+            serde_json::json!({"recipient": "attacker.near"}),
+            "Quote recipient attacker.near",
+        ),
+        (
+            serde_json::json!({"refundTo": "attacker.near"}),
+            "Quote refundTo attacker.near",
+        ),
+        (
+            serde_json::json!({"recipientType": "DESTINATION_CHAIN"}),
+            "recipientType must be INTENTS",
+        ),
+        (
+            serde_json::json!({"refundType": "ORIGIN_CHAIN"}),
+            "refundType must be INTENTS",
+        ),
+        (
+            serde_json::json!({"depositType": "ORIGIN_CHAIN"}),
+            "depositType must be INTENTS",
+        ),
+        (
+            serde_json::json!({"virtualChainRecipient": "0xattacker"}),
+            "virtualChainRecipient is not allowed",
+        ),
+        (
+            serde_json::json!({"virtualChainRefundRecipient": "0xattacker"}),
+            "virtualChainRefundRecipient is not allowed",
+        ),
+        (
+            serde_json::json!({"customRecipientMsg": "{}"}),
+            "customRecipientMsg is not allowed",
+        ),
+        (
+            serde_json::json!({"slippageTolerance": quote::MAX_SLIPPAGE_BPS + 1}),
+            "above the 200 bps maximum",
+        ),
+    ];
+    for (changes, expected) in cases {
+        let terms = quote_terms(changes);
+        let error = outflow(transfer_to(DEPOSIT_ADDRESS), "1", Some(&terms)).unwrap_err();
+        assert!(error.contains(expected), "{}: {}", expected, error);
+    }
+}
+
+#[test]
+#[should_panic(expected = "is not the trading account or its owner")]
+fn test_request_signature_rejects_transfer_to_a_stranger() {
+    let mut contract = trading_account_with_agent();
+    let _ = request_signature(
+        &mut contract,
+        agent(),
+        "intents.near",
+        &MT_TRANSFER.replace("alice.near", "attacker.near"),
+    );
+}
+
+// request_signature verifies against the compiled-in key, so a test-signed quote is refused.
+#[test]
+#[should_panic(expected = "Invalid quote signature: not signed by 1Click")]
+fn test_request_signature_rejects_a_quote_not_signed_by_1click() {
+    let mut contract = trading_account_with_agent();
+    let _ = request_signature_with(
+        &mut contract,
+        agent(),
+        "intents.near",
+        &MT_TRANSFER.replace("alice.near", DEPOSIT_ADDRESS),
+        1,
+        Some(sign_quote(&quote_payload(serde_json::json!({})))),
+    );
+}
+
+/// Makes `caller` the predecessor of the next call, on the trading account at the real quote's
+/// recipient.
+fn call_real_quote_account_as(caller: AccountId) {
+    testing_env!(
+        get_context(caller)
+            .current_account_id(REAL_QUOTE_ACCOUNT.parse().unwrap())
+            .build()
+    );
+}
+
+// A real quote passes every check and reaches the MPC call, which fails on the mocked chain's
+// GasExceeded as in test_request_signature_accepts_mt_transfer.
+#[test]
+#[should_panic(expected = "GasExceeded")]
+fn test_request_signature_accepts_a_real_1click_quote() {
+    call_real_quote_account_as(owner());
+    let mut contract = TradingAccountContract::new(owner(), "v1.signer".parse().unwrap());
+    contract.add_agent(agent());
+    call_real_quote_account_as(agent());
+    let _ = contract.request_signature(
+        "intents.near".parse().unwrap(),
+        MT_TRANSFER.replace("alice.near", DEPOSIT_ADDRESS),
+        U64(1),
+        Base58CryptoHash::from([0u8; 32]),
+        test_support::mpc_public_key(),
+        "trading-account.near".to_string(),
+        Some(real_quote()),
+    );
 }

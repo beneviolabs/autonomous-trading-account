@@ -1,9 +1,11 @@
-// Shared by the unit and sandbox tests: rebuilds the transaction request_signature builds, and
+// Shared by the unit and sandbox tests: rebuilds the transaction request_signature builds (any
+// actions, unchecked, so callback tests can use ones the policy rejects), and
 // signs it the way the MPC signer does, so the callback's ecrecover check passes.
-use crate::TradingAccountContract;
 use crate::models::EcdsaSignatureResponse;
 use omni_transaction::near::NearTransaction;
-use omni_transaction::near::types::{BlockHash, Secp256K1Signature, Signature};
+use omni_transaction::near::types::{
+    Action as OmniAction, BlockHash, Secp256K1Signature, Signature,
+};
 use omni_transaction::near::utils::PublicKeyStrExt;
 use omni_transaction::{NEAR, TransactionBuilder, TxBuilder};
 use secp256k1::{Message, Secp256k1, SecretKey};
@@ -25,17 +27,18 @@ pub fn mpc_public_key() -> String {
 /// The transaction request_signature builds, plus the JSON it passes to sign_request_callback.
 /// Call inside a testing_env whose current account is the trading account.
 pub fn unsigned_tx(
-    contract: &TradingAccountContract,
     receiver: &str,
     actions_json: &str,
     nonce: u64,
     block_hash: [u8; 32],
 ) -> (NearTransaction, String) {
-    let actions = serde_json::from_str(actions_json).unwrap();
-    let receiver_id = receiver.parse().unwrap();
-    let omni_actions = contract
-        .validate_and_build_actions(actions, &receiver_id)
-        .unwrap();
+    let actions: Vec<crate::ActionString> = serde_json::from_str(actions_json).unwrap();
+    let omni_actions = actions
+        .into_iter()
+        .map(|action| {
+            OmniAction::FunctionCall(Box::new(crate::build_function_call(action).unwrap()))
+        })
+        .collect();
     let tx = TransactionBuilder::new::<NEAR>()
         .signer_id(near_sdk::env::current_account_id().to_string())
         .signer_public_key(mpc_public_key().to_public_key().unwrap())

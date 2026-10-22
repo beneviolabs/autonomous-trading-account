@@ -13,7 +13,16 @@ The per-user contract, created by the [factory](factory.md) at `implicit_<24hex>
 
 - The MPC key is derived from the trading account and a derivation path, so only the trading account contract can get signatures for it. The key has full access to the trading account.
 - The contract signs only one call: `mt_transfer` on `intents.near`, the allowlist in [`actions.rs`](../contracts/trading-account/src/actions.rs). Every other contract and method is rejected, and so are bare NEAR transfers.
-- **Arguments aren't checked.** An agent can `mt_transfer` any token the trading account holds on `intents.near` to any recipient. Only add agents you trust with the trading account's funds.
+- **Funds only go back to the user.** Each signed transaction holds one `mt_transfer` with exactly 1 yoctoNEAR attached, and its arguments may only be `mt_transfer`'s own (`receiver_id`, `token_id`, `amount`, `approval`, `memo`). Without a quote, `receiver_id` must be the trading account or the owner. To send anywhere else, the agent passes a 1Click quote, and the contract checks that:
+  - 1Click signed it. The key is compiled in ([`quote.rs`](../contracts/trading-account/src/quote.rs)), so rotating it takes a release and an upgrade by each owner.
+  - It's live, not dry. Its `recipient` and `refundTo` are each the trading account or the owner, and its deposit, recipient and refund types are all `INTENTS`. It names no virtual-chain recipient or custom recipient message. Its `slippageTolerance` is at most 200 bps.
+  - The `mt_transfer` goes to the quote's `depositAddress` and moves its `originAsset`. The amount isn't checked: 1Click refunds the excess, or the whole deposit if it's short, to `refundTo`.
+- **What a stolen agent key can still do.** It can't send funds to an account of its own, but it can lose value:
+  - 1Click's signature doesn't cover `appFees`, and 1Click honors fees any caller sets. A quote can pay a fee to anyone, and the contract can't see it.
+  - It can swap at bad prices on illiquid tokens, or swap back and forth, losing fees and up to 2% slippage each time. The contract has no price oracle.
+  - A swap broadcast after its quote's deadline is refunded to `refundTo`, minus 1Click's refund fee.
+  - A compromised 1Click key would get past the quote check entirely.
+- **Only upgraded accounts get these checks.** Trading accounts on v0 sign any call on v0's wider allowlist, including `ft_withdraw` and `mt_transfer` to any receiver.
 - **Only the owner can change the MPC signer contract**, with `set_signer_id`. The trading account only returns a transaction whose signature recovers to the transaction's own MPC key.
 - **The owner isn't an agent** unless it adds itself, so it can't call `request_signature` by default.
 - **To cut off an agent at once**, remove it with `remove_agent` and delete the MPC key with `delete_key`. Removing the agent alone leaves transactions it already had signed valid until they expire, about 24 hours later. Deleting the key also stops all signing until the owner adds it back with `add_full_access_key`. Adding it back doesn't revive transactions signed before the deletion. The contract only signs nonces below the current block height × 1,000,000, and a re-added key starts above that.
@@ -61,8 +70,8 @@ These commands use testnet and near-cli-rs (tested with 0.22). Variables:
        participant NEAR as NEAR
 
        Agent->>NEAR: MPC key nonce + recent block hash
-       Agent->>TA: request_signature(contract_id, actions_json, nonce, block_hash, mpc_signer_pk, derivation_path)
-       TA->>TA: check caller and allowlist, build transaction
+       Agent->>TA: request_signature(contract_id, actions_json, nonce, block_hash, mpc_signer_pk, derivation_path, quote)
+       TA->>TA: check caller, allowlist and destination, build transaction
        TA->>MPC: sign(transaction hash, path)
        MPC-->>TA: signature
        TA-->>Agent: base64 signed transaction
@@ -75,7 +84,7 @@ These commands use testnet and near-cli-rs (tested with 0.22). Variables:
       ```
    2. Request the signature. This one moves wNEAR the trading account holds on `intents.near` to the owner (`amount` is in wNEAR's smallest unit). `intents.near` only exists on mainnet, so on testnet the transaction is signed but fails when broadcast. `actions_json` is a JSON *string*, and `nonce` is the current nonce + 1.
       ```bash
-      near contract call-function as-transaction $TA request_signature json-args "{\"contract_id\":\"intents.near\",\"actions_json\":\"[{\\\"type\\\":\\\"FunctionCall\\\",\\\"method_name\\\":\\\"mt_transfer\\\",\\\"args\\\":{\\\"receiver_id\\\":\\\"$OWNER\\\",\\\"token_id\\\":\\\"nep141:wrap.near\\\",\\\"amount\\\":\\\"1000\\\"},\\\"gas\\\":\\\"30000000000000\\\",\\\"deposit\\\":\\\"1\\\"}]\",\"nonce\":\"<nonce + 1>\",\"block_hash\":\"<block hash>\",\"mpc_signer_pk\":\"<MPC key>\",\"derivation_path\":\"$AGENT\"}" prepaid-gas '300.0 Tgas' attached-deposit '1 yoctoNEAR' sign-as $AGENT network-config testnet sign-with-keychain send
+      near contract call-function as-transaction $TA request_signature json-args "{\"contract_id\":\"intents.near\",\"actions_json\":\"[{\\\"type\\\":\\\"FunctionCall\\\",\\\"method_name\\\":\\\"mt_transfer\\\",\\\"args\\\":{\\\"receiver_id\\\":\\\"$OWNER\\\",\\\"token_id\\\":\\\"nep141:wrap.near\\\",\\\"amount\\\":\\\"1000\\\"},\\\"gas\\\":\\\"30000000000000\\\",\\\"deposit\\\":\\\"1\\\"}]\",\"nonce\":\"<nonce + 1>\",\"block_hash\":\"<block hash>\",\"mpc_signer_pk\":\"<MPC key>\",\"derivation_path\":\"$AGENT\",\"quote\":null}" prepaid-gas '300.0 Tgas' attached-deposit '1 yoctoNEAR' sign-as $AGENT network-config testnet sign-with-keychain send
       ```
    3. Broadcast the base64 value it returns:
       ```bash

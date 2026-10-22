@@ -24,11 +24,14 @@ use omni_transaction::{
 };
 
 pub use crate::models::*;
+use crate::quote::QuoteTerms;
+pub use crate::quote::SignedQuote;
 
 mod actions;
 #[cfg(all(test, feature = "integration-tests"))]
 mod integration_tests;
 mod models;
+mod quote;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]
@@ -57,6 +60,22 @@ const V0_OWNER_LEN: u8 = 64;
 // migrate tells v0 state apart only while no state version can equal V0_OWNER_LEN. Remove the
 // v0 migration, and this assert, once no account runs v0.
 const _: () = assert!(STATE_VERSION < V0_OWNER_LEN);
+
+/// Builds the call an action describes, with no checks on what it does.
+fn build_function_call(action: ActionString) -> Result<OmniFunctionCallAction, String> {
+    let ActionString::FunctionCall {
+        method_name,
+        args,
+        gas,
+        deposit,
+    } = action;
+    Ok(OmniFunctionCallAction {
+        method_name,
+        args: serde_json::to_vec(&args).map_err(|e| format!("Failed to serialize args: {}", e))?,
+        gas: Gas::from_gas(gas.parse().map_err(|_| "Invalid gas format")?),
+        deposit: NearToken::from_yoctonear(deposit.parse().map_err(|_| "Invalid deposit format")?),
+    })
+}
 
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
@@ -272,43 +291,26 @@ impl TradingAccountContract {
         );
     }
 
-    /// Validate and build OmniActions from ActionString inputs
+    /// Validates the one action an agent may send and builds it. Funds may only go where
+    /// check_outflow allows: the trading account, its owner, or `quote`'s deposit.
     fn validate_and_build_actions(
         &self,
         actions: Vec<ActionString>,
         contract_id: &AccountId,
+        quote: Option<&QuoteTerms>,
     ) -> Result<Vec<OmniAction>, String> {
-        if actions.is_empty() {
-            return Err("Actions cannot be empty. At least one action is required.".to_string());
-        }
-
-        actions
-            .into_iter()
-            .map(|action| match action {
-                ActionString::FunctionCall {
-                    method_name,
-                    args,
-                    gas,
-                    deposit,
-                } => {
-                    let gas = Gas::from_gas(gas.parse().map_err(|_| "Invalid gas format")?);
-                    let deposit_near = NearToken::from_yoctonear(
-                        deposit.parse().map_err(|_| "Invalid deposit format")?,
-                    );
-                    actions::check_allowlist(contract_id, &method_name)?;
-
-                    let args_bytes = serde_json::to_vec(&args)
-                        .map_err(|e| format!("Failed to serialize args: {}", e))?;
-
-                    Ok(OmniAction::FunctionCall(Box::new(OmniFunctionCallAction {
-                        method_name,
-                        args: args_bytes,
-                        gas,
-                        deposit: deposit_near,
-                    })))
-                }
-            })
-            .collect()
+        // One action, so a quote authorizes exactly one transfer.
+        let [action] = <[ActionString; 1]>::try_from(actions)
+            .map_err(|actions| format!("Exactly one action is required. Got: {}", actions.len()))?;
+        let call = build_function_call(action)?;
+        actions::check_allowlist(contract_id, &call.method_name)?;
+        // Checked on the built call, which is exactly what gets signed.
+        actions::check_outflow(
+            &call,
+            quote,
+            &[env::current_account_id(), self.owner_id.clone()],
+        )?;
+        Ok(vec![OmniAction::FunctionCall(Box::new(call))])
     }
 
     /// Create signature request from transaction and required parameters
@@ -330,7 +332,9 @@ impl TradingAccountContract {
         serde_json::json!({ "request": sign_request })
     }
 
-    // Request a signature from the MPC signer
+    // Request a signature from the MPC signer. Its JSON arguments are the agents' interface, so
+    // they stay flat rather than grouped into a struct.
+    #[allow(clippy::too_many_arguments)]
     #[payable]
     pub fn request_signature(
         &mut self,
@@ -340,6 +344,7 @@ impl TradingAccountContract {
         block_hash: Base58CryptoHash,
         mpc_signer_pk: String,
         derivation_path: String,
+        quote: Option<SignedQuote>,
     ) -> Promise {
         let attached_gas = env::prepaid_gas();
         assert!(
@@ -380,16 +385,22 @@ impl TradingAccountContract {
             }
         };
 
+        let quote_terms = quote.map(|quote| {
+            quote::verify(&quote, quote::ONE_CLICK_MANAGER_KEYS)
+                .unwrap_or_else(|e| near_sdk::env::panic_str(&e))
+        });
+
         // Validate and build OmniActions
-        let omni_actions = match self.validate_and_build_actions(actions, &contract_id) {
-            Ok(actions) => actions,
-            Err(e) => {
-                near_sdk::env::panic_str(&format!(
-                    "Failed to validate and build OmniActions: {:?}",
-                    e
-                ));
-            }
-        };
+        let omni_actions =
+            match self.validate_and_build_actions(actions, &contract_id, quote_terms.as_ref()) {
+                Ok(actions) => actions,
+                Err(e) => {
+                    near_sdk::env::panic_str(&format!(
+                        "Failed to validate and build OmniActions: {:?}",
+                        e
+                    ));
+                }
+            };
 
         // construct the entire transaction to be signed
         let tx = TransactionBuilder::new::<NEAR>()
