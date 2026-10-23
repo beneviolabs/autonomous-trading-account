@@ -23,14 +23,12 @@ Writing tests:
 - Name them `test_<method>_<behaviour>`, for example `test_create_proxy_global_rejects_non_owner_predecessor`.
 - For a method that returns a `Promise`, drop the promise and check what it scheduled with `near_sdk::test_utils::get_created_receipts()`. Checking that a `Promise` came back proves nothing.
 
-What covers `request_signature`, the path that builds and signs transactions:
-- **`test_transaction_bytes_unchanged`** pins the bytes the MPC signs and the final signed transaction to what the audited version produced. If it fails after a dependency bump, the encoding or the JSON hand-off between `request_signature` and `sign_request_callback` changed. Don't update the expected values without finding out why.
-- **`create_signature_request` unit tests** pin the JSON sent to the MPC signer's `sign`, with the sha256 payload computed outside the contract.
-- **`sign_request_callback` unit tests** feed it a response in the real signer's format, signed with a fixed secp256k1 key by `test_support.rs` (success and signer failure). `test_sign_request_callback_keeps_every_deposit` checks that deposits reach the signed transaction unchanged, including ones whose digits prefix each other (1 and 10, the pen test #8 case), 0 and `u128::MAX`.
-- **`test_request_signature_with_stub_signer`** runs the whole call in the sandbox with the documented minimum of 100 Tgas, using a tiny WAT contract in place of `v1.signer`. Its two `mt_transfer` calls carry deposits 1 and 10, so it also covers the deposit case through the real JSON hand-off.
-- **`test_delete_key_invalidates_signed_transactions`** hoards a transaction signed with the highest nonce the contract allows, then broadcasts the signed transactions in the sandbox, before and after the owner deletes the MPC key and adds it back. near-workspaces only sends transactions it signs itself, so the test posts them to the sandbox's `send_tx` RPC.
-- **`test_request_signature_rejects_nonce_from_a_future_block`** (a unit test and a sandbox test of the same name) checks that a nonce at or above the current block height × 1,000,000 is rejected with `Invalid nonce`.
-- Only a testnet run checks the real signer.
+Where `swap` is tested:
+- `unit_tests.rs`: the quote checks (`test_verify_*`, `test_check_*`, `test_parse_deadline_ms_*`) and `swap` on the mocked chain (`test_swap_*`).
+- `integration_tests.rs`: `swap`'s cross-contract call in the sandbox (`test_swap_*`), against a stub `intents.near`.
+- Only a mainnet run checks the real `intents.near` and 1Click.
+
+**The sandbox build trusts a test key.** `scripts/test.sh` builds the wasm with `ONE_CLICK_TEST_KEY` set, so the contract also accepts quotes signed with the tests' key and the sandbox tests can sign their own. Don't set it for any other build, and never deploy a dev build. Release builds pass no environment into their container, so they trust 1Click's key alone.
 
 Gotchas:
 - **The first integration test run downloads the sandbox.** `near-workspaces` fetches neard 2.13.4 (the version mainnet runs) the first time the tests start a sandbox, and caches it. To run offline, or with a binary you already have, set `NEAR_SANDBOX_BIN_PATH=/path/to/near-sandbox`.
@@ -50,6 +48,6 @@ Gotchas:
 
 ## End-to-end on a live network
 
-<!-- TODO: document a repeatable testnet end-to-end check (create, authorize, request_signature, broadcast). -->
+<!-- TODO: document a repeatable mainnet end-to-end check (create, authorize, swap, liquidate). -->
 
 TODO.

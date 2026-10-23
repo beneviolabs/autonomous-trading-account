@@ -21,7 +21,9 @@ cargo test -p trading-account-factory --lib -- --nocapture
 echo ""
 
 echo -e "${GREEN}Running Integration Tests...${NC}"
-"$ROOT/contracts/trading-account/build.sh"
+# The sandbox tests' build also trusts the key they sign quotes with (seed "1click", as in the
+# unit tests). Never deploy it.
+ONE_CLICK_TEST_KEY="ed25519:4xzHWfzwdwnkGbsL3G1C7UBt1v9DX2ZnnE8zmatq3Lba" "$ROOT/contracts/trading-account/build.sh"
 cargo test -p trading-account --features integration-tests --lib integration_tests -- --nocapture
 
 echo -e "${GREEN}All tests passed!${NC}"

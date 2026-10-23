@@ -26,11 +26,10 @@ integration-tests = []
 near-sdk = {version = "5.29.1", default-features = false, features = ["unstable", "legacy", "global-contracts"] }
 borsh = "1.5.1"
 serde = { version = "1.0.214", features = ["derive"] }
-omni-transaction = { version = "0.5.0", default-features = false, features = ["near", "serde", "serde_json"] }
 sha2 = "0.10.8"
 serde_json = "1.0"
-hex = "0.4.3"
-schemars = "0.8.22"
+# Parses quote deadlines. Parsing only: +10.5 KB of wasm.
+time = { version = "0.3.55", default-features = false, features = ["parsing"] }
 
 
 [dev-dependencies]
@@ -39,15 +38,14 @@ near-sdk = { version = "5.29.1", features = ["unit-testing"] }
 near-workspaces = "0.23.0"
 tokio = { version = "1", features = ["full"] }
 anyhow = "1.0"
-# Signs test transactions the way the MPC signer does. Same version near-crypto already uses.
-secp256k1 = { version = "0.27", features = ["recovery"] }
-# Compiles the stub MPC signer in integration_tests.rs.
+# Compiles the stub intents.near in integration_tests.rs.
 wat = "1"
-# Broadcasts signed transactions to the sandbox in integration_tests.rs. The version
+# Encode code hashes and owner ids in integration_tests.rs.
+bs58 = "0.5.1"
+hex = "0.4.3"
+# Broadcasts the global-contract transactions to the sandbox in integration_tests.rs. The version
 # near-workspaces already uses; no TLS needed for the local RPC.
 reqwest = { version = "0.12", default-features = false }
-# Formats the test MPC key in test_support.rs.
-bs58 = "0.5.1"
 # Build the global-contract transactions near-workspaces can't send (integration_tests.rs). The
 # versions near-workspaces already uses.
 near-primitives = "0.37.4"

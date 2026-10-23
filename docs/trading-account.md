@@ -1,24 +1,33 @@
 # Trading account
 
-The per-user contract, created by the [factory](factory.md) at `implicit_<24hex>.auth.peerfolio.near`, or `implicit_<24hex>.auth.dev.peerfolio.near` from the [dev factory](factory.md#dev-factory). The owner moves in only the funds an agent may trade with. Agents can then have the MPC signer sign transactions from the trading account, limited to an allowlist. Method details are in the [reference](reference.md#trading-account).
+The per-user contract, created by the [factory](factory.md) at `implicit_<24hex>.auth.peerfolio.near`, or `implicit_<24hex>.auth.dev.peerfolio.near` from the [dev factory](factory.md#dev-factory). The owner moves in only the funds an agent may trade with. Agents can then swap them on `intents.near` with 1Click quotes that pay out only to the user. Method details are in the [reference](reference.md#trading-account).
 
 ## Glossary
 
 - **Owner**: the user's NEAR account that controls the trading account.
-- **Agent**: an account the owner allows to request signatures, usually Peerfolio's bot: `bot.peerfolio.near` in production, `bot.dev.peerfolio.near` in staging and local dev. A trading account can have at most 10.
-- **MPC signer**: the chain-signatures contract set by `signer_id`. It signs transactions for the trading account.
+- **Agent**: an account the owner allows to call `swap`, usually Peerfolio's bot: `bot.peerfolio.near` in production, `bot.dev.peerfolio.near` in staging and local dev. A trading account can have at most 10.
+- **1Click quote**: a swap quote from NEAR Intents' 1Click API, signed with 1Click's key. A live quote has a `depositAddress`; depositing `amountIn` of `originAsset` there starts the swap.
 - **Trading account**: this contract.
 
 ## Security model
 
-- The MPC key is derived from the trading account and a derivation path, so only the trading account contract can get signatures for it. The key has full access to the trading account.
-- The contract signs only one call: `mt_transfer` on `intents.near`, the allowlist in [`actions.rs`](../contracts/trading-account/src/actions.rs). Every other contract and method is rejected, and so are bare NEAR transfers.
-- **Arguments aren't checked.** An agent can `mt_transfer` any token the trading account holds on `intents.near` to any recipient. Only add agents you trust with the trading account's funds.
-- **Only the owner can change the MPC signer contract**, with `set_signer_id`. The trading account only returns a transaction whose signature recovers to the transaction's own MPC key.
-- **The owner isn't an agent** unless it adds itself, so it can't call `request_signature` by default.
-- **To cut off an agent at once**, remove it with `remove_agent` and delete the MPC key with `delete_key`. Removing the agent alone leaves transactions it already had signed valid until they expire, about 24 hours later. Deleting the key also stops all signing until the owner adds it back with `add_full_access_key`. Adding it back doesn't revive transactions signed before the deletion. The contract only signs nonces below the current block height × 1,000,000, and a re-added key starts above that.
-- **The trading account never broadcasts anything.** It returns a signed transaction, and the caller broadcasts it. The transaction runs from the trading account, so gas and attached deposits come out of its balance.
-- The allowlist is compiled in. Changing it means [releasing new trading account code](releases.md#release-trading-account-code), and existing trading accounts keep their old code until their owner [upgrades them](#upgrading-a-trading-account).
+- **Who can swap.** The owner and its agents, each with exactly 1 yoctoNEAR attached, so the call must be signed with a full-access key. Nobody else.
+- **The trading account signs nothing.** `swap` calls `mt_transfer` on `intents.near` itself, so `intents.near` sees the trading account as the sender. There are no signed transactions to hoard, and no MPC key is needed.
+- **The quote decides the transfer.** The caller passes only a 1Click quote and its signature. The contract sends the quote's `amountIn` of its `originAsset` to its `depositAddress`, and checks that:
+  - 1Click signed it. The key is compiled in ([`quote.rs`](../contracts/trading-account/src/quote.rs)), so rotating it takes a release and an upgrade by each owner. Once the signature verifies, the quote's values are trusted as 1Click's; the contract doesn't sanity-check amounts.
+  - It's live, not dry. Its `recipient` and `refundTo` are each the trading account or the owner, and its deposit, recipient and refund types are all `INTENTS`. It names no virtual-chain recipient or custom recipient message. Its `slippageTolerance` is at most 200 bps.
+  - Its `deadline` is after the block time. That's the quote's deposit deadline, which 1Click sets (3 days in the live test). There's no limit on the quote's age.
+- **A valid quote can be reused** until its deadline. Each use is another deposit to the same address, which 1Click swaps or refunds to `refundTo`. This is accepted by design: the funds still only go back to the user.
+- **Cash-out** is a swap with `recipient` set to the owner (liquidation), followed by the owner's own `ft_withdraw` from intents. The trading account has no withdraw method.
+- **What a stolen agent key can still do.** It can't send funds to an account of its own, but it can lose value:
+  - 1Click's signature doesn't cover `appFees`, and 1Click honors fees any caller sets. A quote can pay a fee to anyone, and the contract can't see it.
+  - It can swap at bad prices on illiquid tokens, or swap back and forth, losing fees and up to 2% slippage each time. The contract has no price oracle.
+  - A compromised 1Click key would get past the quote check entirely.
+- **Keys registered on `intents.near` bypass the contract.** Any public key registered for the trading account on `intents.near` can sign intents that move its balance anywhere. `delete_key` doesn't unregister a key; that takes `intents.near`'s `remove_public_key`, called by the account.
+- **Delete the MPC key after upgrading.** Accounts on v0 hold an MPC key with full access, which their agents' transactions were signed with. 1.0.0 doesn't use it, so the owner should delete it with `delete_key`, and unregister it from `intents.near` if it's registered there.
+- **Only upgraded accounts get these checks.** Trading accounts on v0 have no `swap`, and sign any call on v0's wider allowlist, including `ft_withdraw` and `mt_transfer` to any receiver.
+- **To cut off an agent**, remove it with `remove_agent`. It takes effect at once.
+- The checks are compiled in. Changing them means [releasing new trading account code](releases.md#release-trading-account-code), and existing trading accounts keep their old code until their owner [upgrades them](#upgrading-a-trading-account).
 
 ## Lifecycle
 
@@ -36,75 +45,55 @@ These commands use testnet and near-cli-rs (tested with 0.22). Variables:
    near contract call-function as-transaction auth.peerfolio.testnet deposit_and_create_proxy_global json-args "{\"owner_id\":\"$OWNER\"}" prepaid-gas '300.0 Tgas' attached-deposit '0.12 NEAR' sign-as $OWNER network-config testnet sign-with-access-key-file $OWNER_KEY send
    ```
    `$TA` is `<name>.auth.peerfolio.testnet`. Store it; don't re-derive it later.
-2. **Derive the MPC key.** By convention, the derivation path is the agent's account ID. It returns the key with its `secp256k1:` prefix; use that whole value wherever the commands below say `<MPC key>`.
-   ```bash
-   near contract call-function as-read-only v1.signer-prod.testnet derived_public_key json-args "{\"path\":\"$AGENT\",\"predecessor\":\"$TA\",\"domain_id\":0}" network-config testnet now
-   ```
-3. **Register the key and authorize the agent**, as the owner:
-   ```bash
-   near contract call-function as-transaction $TA add_full_access_key json-args '{"public_key":"<MPC key>"}' prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' sign-as $OWNER network-config testnet sign-with-access-key-file $OWNER_KEY send
-   ```
+2. **Authorize the agent**, as the owner:
    ```bash
    near contract call-function as-transaction $TA add_agent json-args "{\"account_id\":\"$AGENT\"}" prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' sign-as $OWNER network-config testnet sign-with-access-key-file $OWNER_KEY send
    ```
-4. **Fund it** with what the agent may trade. Keep some NEAR there at all times, because it pays gas for every signed transaction.
+3. **Fund it.** Move the tokens the agent may trade into the trading account's `intents.near` balance, and keep a little NEAR in the account for its storage. The caller of `swap` pays its gas and the 1 yocto.
    ```bash
    near tokens $OWNER send-near $TA '0.2 NEAR' network-config testnet sign-with-access-key-file $OWNER_KEY send
    ```
-5. **Trade.** The agent requests a signed transaction and broadcasts it:
+4. **Trade.** The agent gets a live 1Click quote whose `recipient` and `refundTo` are the trading account (or the owner, to liquidate), and passes it to `swap`:
 
    ```mermaid
    sequenceDiagram
        participant Agent as Agent
+       participant OneClick as 1Click
        participant TA as Trading account
-       participant MPC as MPC signer
-       participant NEAR as NEAR
+       participant Intents as intents.near
 
-       Agent->>NEAR: MPC key nonce + recent block hash
-       Agent->>TA: request_signature(contract_id, actions_json, nonce, block_hash, mpc_signer_pk, derivation_path)
-       TA->>TA: check caller and allowlist, build transaction
-       TA->>MPC: sign(transaction hash, path)
-       MPC-->>TA: signature
-       TA-->>Agent: base64 signed transaction
-       Agent->>NEAR: broadcast (runs from the trading account)
+       Agent->>OneClick: quote (dry: false)
+       OneClick-->>Agent: signed quote with depositAddress
+       Agent->>TA: swap(quote_payload, quote_signature)
+       TA->>TA: check caller, signature and terms
+       TA->>Intents: mt_transfer(depositAddress, originAsset, amountIn)
+       Intents-->>TA: result, checked by swap_callback
+       OneClick->>Intents: swap, delivered to recipient
    ```
 
-   1. Get the MPC key's current nonce from `near account list-keys $TA network-config testnet now`, and a recent block hash:
-      ```bash
-      curl -s https://rpc.testnet.near.org -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"block","params":{"finality":"final"}}' | jq -r .result.header.hash
-      ```
-   2. Request the signature. This one moves wNEAR the trading account holds on `intents.near` to the owner (`amount` is in wNEAR's smallest unit). `intents.near` only exists on mainnet, so on testnet the transaction is signed but fails when broadcast. `actions_json` is a JSON *string*, and `nonce` is the current nonce + 1.
-      ```bash
-      near contract call-function as-transaction $TA request_signature json-args "{\"contract_id\":\"intents.near\",\"actions_json\":\"[{\\\"type\\\":\\\"FunctionCall\\\",\\\"method_name\\\":\\\"mt_transfer\\\",\\\"args\\\":{\\\"receiver_id\\\":\\\"$OWNER\\\",\\\"token_id\\\":\\\"nep141:wrap.near\\\",\\\"amount\\\":\\\"1000\\\"},\\\"gas\\\":\\\"30000000000000\\\",\\\"deposit\\\":\\\"1\\\"}]\",\"nonce\":\"<nonce + 1>\",\"block_hash\":\"<block hash>\",\"mpc_signer_pk\":\"<MPC key>\",\"derivation_path\":\"$AGENT\"}" prepaid-gas '300.0 Tgas' attached-deposit '1 yoctoNEAR' sign-as $AGENT network-config testnet sign-with-keychain send
-      ```
-   3. Broadcast the base64 value it returns:
-      ```bash
-      near transaction send-signed-transaction base64-signed-transaction '<base64>' network-config testnet
-      ```
-      Or send it to the RPC directly:
-      ```bash
-      curl -s https://rpc.testnet.near.org -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"send_tx","params":{"signed_tx_base64":"<base64>","wait_until":"FINAL"}}'
-      ```
+   `quote_payload` is the exact JSON 1Click signed, a JSON *string*:
+   ```bash
+   near contract call-function as-transaction $TA swap json-args "{\"quote_payload\":\"<payload JSON, escaped>\",\"quote_signature\":\"ed25519:<signature>\"}" prepaid-gas '100.0 Tgas' attached-deposit '1 yoctoNEAR' sign-as $AGENT network-config mainnet sign-with-keychain send
+   ```
+   1Click and `intents.near` only exist on mainnet, so this step can't be run on testnet. If something fails, see the [common failures](reference.md#swap).
 
-   If something fails, see the [common failures](reference.md#request_signature).
+Example transactions:
+- Mainnet: [a `swap` of 0.02 wNEAR](https://nearblocks.io/txns/GcStxtskzJQfMsphnA1AUogZWncmT7B9PNPoPR72M1g5), from a prototype of 1.0.0.
 
-Example transactions, from before the implicit-owner naming:
+From before the implicit-owner naming and 1.0.0:
 - Testnet: [wrapping 1 NEAR](https://testnet.nearblocks.io/txns/Hi2pfe89tBdMN2oY2dFXLuHcSBVFotx6pHViDQuKUZDi), signed through [this `request_signature` call](https://testnet.nearblocks.io/txns/831u2KqbdtzvJti5HUhGnp4tZD7Q8onUzD11rwBjrAAm) (older API).
 - Mainnet: [adding a public key on `intents.near`](https://nearblocks.io/txns/GRw6oEWjAQ2QT9oDtsgBSRWr3s4oCW4A8zCpHCRXD62s), signed through [this request](https://nearblocks.io/txns/9PJXbvcb4RMxjwK8VW4N54RnvrjENUCr6N1nv9f3DZJQ).
 - Onboarding: [creating a trading account](https://testnet.nearblocks.io/txns/CF1ainGjroxtppNTWWkFgQsiC5kC4iJ3X7v8FgLMrWDE?tab=execution), [registering the MPC key](https://testnet.nearblocks.io/txns/5Jyn459DhAaRxEqvTo3x724cgxCpjTH1Jaoc7uyVNQt9).
 
 ## Replacing an agent
 
-To move a trading account to a new agent, the owner:
-1. Adds the new agent's MPC key and the new agent, as in [Lifecycle](#lifecycle) steps 2 and 3 with `$AGENT` set to the new agent. The key differs per agent because the derivation path is the agent's account ID.
-2. Removes the old agent with `remove_agent`.
-3. Deletes the old agent's MPC key with `delete_key`. Until then, transactions the old agent already had signed stay valid until they expire, about 24 hours later.
+The owner adds the new agent with `add_agent` and removes the old one with `remove_agent`, in either order; both can go in one transaction to the trading account.
 
-The owner can sign all of these as one transaction to the trading account. The trading account code deployed now (see the [README](../README.md#deployments)) predates the agent renames and `delete_key` until its owner [upgrades it](#upgrading-a-trading-account): it uses `add_authorized_user` and `remove_authorized_user`, and the old MPC key can't be deleted. Removing the old agent still stops it requesting new signatures; what it already had signed stays valid until it expires.
+The trading account code deployed now (see the [README](../README.md#deployments)) predates 1.0.0 until its owner [upgrades it](#upgrading-a-trading-account): it uses `add_authorized_user` and `remove_authorized_user`, signs through the MPC key, and can't delete that key. Removing the old agent still stops it requesting new signatures, but what it already had signed stays valid until it expires, about 24 hours later.
 
 ## Upgrading a trading account
 
-A [release](releases.md#release-trading-account-code) changes only the code of trading accounts created afterwards. An existing account keeps its code until its owner upgrades it to the code the factory points at. The upgrade switches the code and runs `migrate` in one receipt, so if `migrate` fails the account keeps its old code and state. Agents, the owner, the signer and the MPC key carry over.
+A [release](releases.md#release-trading-account-code) changes only the code of trading accounts created afterwards. An existing account keeps its code until its owner upgrades it to the code the factory points at. The upgrade switches the code and runs `migrate` in one receipt, so if `migrate` fails the account keeps its old code and state. The agents and the owner carry over. Upgrading from v0 drops the MPC signer from the state; the MPC key stays on the account until the owner deletes it (see the [security model](#security-model)).
 
 Get the hash the account's own factory (its parent) points at, and check it matches the hash in the version's [GitHub Release](releases.md#versions):
 ```bash
