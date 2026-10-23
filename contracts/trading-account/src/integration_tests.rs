@@ -752,9 +752,9 @@ async fn test_upgrade_keeps_owner_and_agents() -> Result<()> {
     assert_upgraded_intact(&account, &agent, &agents).await
 }
 
-/// Stands in for intents.near: `mt_transfer` records its args, predecessor, attached deposit and
-/// prepaid gas, which `args`, `predecessor`, `deposit` (16 bytes) and `gas` (8 bytes) return raw,
-/// little-endian.
+/// Stands in for intents.near: `mt_transfer` and `mt_batch_transfer` record their args,
+/// predecessor, attached deposit and prepaid gas, which `args`, `predecessor`, `deposit` (16 bytes)
+/// and `gas` (8 bytes) return raw, little-endian.
 fn stub_intents() -> Result<Vec<u8>> {
     Ok(wat::parse_str(
         r#"(module
@@ -777,7 +777,7 @@ fn stub_intents() -> Result<Vec<u8>> {
     (drop (call $storage_read (i64.const 1) (local.get $key) (i64.const 0)))
     (call $read_register (i64.const 0) (i64.const 1024))
     (call $value_return (call $register_len (i64.const 0)) (i64.const 1024)))
-  (func (export "mt_transfer")
+  (func (export "mt_transfer") (export "mt_batch_transfer")
     (call $input (i64.const 0))
     (call $save_register (i64.const 0))
     (call $predecessor (i64.const 0))
@@ -808,7 +808,7 @@ async fn patched_contract(worker: &Worker<Sandbox>, id: &str, wasm: &[u8]) -> Re
     Ok(Contract::from_secret_key(id, sk, worker))
 }
 
-/// The sandbox accounts the swap tests use.
+/// The sandbox accounts the swap and transfer_to_owner tests use.
 struct SwapAccounts {
     /// The trading account, at the real quote's recipient.
     trading_account: Contract,
@@ -1018,6 +1018,134 @@ async fn test_swap_verifies_a_real_1click_quote() -> Result<()> {
     assert!(
         outcome.is_success()
             || failures.contains("Quote deadline 2026-10-25T16:21:59.865Z has passed"),
+        "{}",
+        failures
+    );
+    Ok(())
+}
+
+/// `caller` moves `tokens` (token id to amount) to the owner of `trading_account`, with 1 yocto
+/// and `gas`.
+async fn transfer_to_owner(
+    caller: &Account,
+    trading_account: &Contract,
+    tokens: serde_json::Value,
+    gas: Gas,
+) -> Result<near_workspaces::result::ExecutionFinalResult> {
+    Ok(caller
+        .call(trading_account.id(), "transfer_to_owner")
+        .args_json(json!({ "tokens": tokens, "memo": "rebalance" }))
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(gas)
+        .transact()
+        .await?)
+}
+
+/// `n` distinct tokens, each with a non-zero amount.
+fn transfer_tokens(n: usize) -> serde_json::Value {
+    (0..n)
+        .map(|i| {
+            (
+                format!("nep141:token{}.near", i),
+                json!((i + 1).to_string()),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>()
+        .into()
+}
+
+// transfer_to_owner's batch reaches intents.near from the trading account itself, with the 1 yocto,
+// and always names the owner as the receiver.
+#[tokio::test]
+async fn test_transfer_to_owner_calls_intents_as_the_trading_account() -> Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let SwapAccounts {
+        trading_account,
+        intents,
+        owner,
+        agent,
+    } = deploy_for_swap(&worker).await?;
+
+    let outcome = transfer_to_owner(
+        &agent,
+        &trading_account,
+        transfer_tokens(3),
+        Gas::from_tgas(100),
+    )
+    .await?;
+    assert!(outcome.is_success(), "{:#?}", outcome.failures());
+    println!(
+        "transfer_to_owner burnt {} Tgas over {} receipts",
+        outcome.total_gas_burnt.as_tgas(),
+        outcome.receipt_outcomes().len()
+    );
+
+    let predecessor = intents.view("predecessor").await?.result;
+    assert_eq!(predecessor, trading_account.id().as_bytes());
+    let deposit = intents.view("deposit").await?.result;
+    assert_eq!(u128::from_le_bytes(deposit.try_into().unwrap()), 1);
+    let args: serde_json::Value = intents.view("args").await?.json()?;
+    assert_eq!(
+        args,
+        json!({
+            "receiver_id": owner.id(),
+            "token_ids": ["nep141:token0.near", "nep141:token1.near", "nep141:token2.near"],
+            "amounts": ["1", "2", "3"],
+            "memo": "rebalance",
+        })
+    );
+    Ok(())
+}
+
+// The minimum gas for 10 tokens is enough for the whole transfer.
+#[tokio::test]
+async fn test_transfer_to_owner_succeeds_with_its_minimum_gas() -> Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let SwapAccounts {
+        trading_account,
+        intents,
+        agent,
+        ..
+    } = deploy_for_swap(&worker).await?;
+
+    let gas = crate::gas_for_transfer_to_owner(10);
+    let outcome = transfer_to_owner(&agent, &trading_account, transfer_tokens(10), gas).await?;
+    assert!(outcome.is_success(), "{:#?}", outcome.failures());
+    let gas = u64::from_le_bytes(intents.view("gas").await?.result.try_into().unwrap());
+    assert!(gas >= crate::mt_batch_transfer_min_gas(10).as_gas());
+    Ok(())
+}
+
+// The owner can transfer to itself too; anyone else is refused.
+#[tokio::test]
+async fn test_transfer_to_owner_callers() -> Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let SwapAccounts {
+        trading_account,
+        owner,
+        ..
+    } = deploy_for_swap(&worker).await?;
+
+    let outcome = transfer_to_owner(
+        &owner,
+        &trading_account,
+        transfer_tokens(1),
+        Gas::from_tgas(100),
+    )
+    .await?;
+    assert!(outcome.is_success(), "{:#?}", outcome.failures());
+
+    let stranger = worker.dev_create_account().await?;
+    let outcome = transfer_to_owner(
+        &stranger,
+        &trading_account,
+        transfer_tokens(1),
+        Gas::from_tgas(100),
+    )
+    .await?;
+    let failures = format!("{:?}", outcome.failures());
+    assert!(
+        failures.contains("Unauthorized: only the owner or an agent can transfer to the owner"),
         "{}",
         failures
     );

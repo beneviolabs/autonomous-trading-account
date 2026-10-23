@@ -1,7 +1,9 @@
+use std::collections::BTreeMap;
+
 use near_sdk::base64;
 use near_sdk::borsh::BorshDeserialize;
 use near_sdk::collections::UnorderedSet;
-use near_sdk::json_types::Base58CryptoHash;
+use near_sdk::json_types::{Base58CryptoHash, U128};
 use near_sdk::{
     AccountId, AccountIdRef, Gas, GasWeight, NearToken, PanicOnDefault, Promise, PublicKey, env,
     near,
@@ -19,7 +21,7 @@ mod unit_tests;
 mod utils;
 
 const ADD_PUBLIC_KEY_GAS: Gas = Gas::from_tgas(10); // intents.near's add_public_key
-const CALLBACK_GAS: Gas = Gas::from_tgas(10); // swap_callback's gas
+const CALLBACK_GAS: Gas = Gas::from_tgas(10); // swap_callback's and transfer_to_owner_callback's gas
 // migrate's budget. With 10 agents it burns about 3 Tgas (release-gate tests, 2026-10-08); the
 // rest is headroom for later migrations, which chain every version since the account's.
 const MIGRATE_GAS: Gas = Gas::from_tgas(50);
@@ -29,14 +31,25 @@ const MAX_AGENTS: u64 = 10; // Maximum number of agents per trading account
 const NEAR_INTENTS_ADDRESS: &AccountIdRef = AccountIdRef::new_or_panic("intents.near");
 // mt_transfer gets at least this much, plus all the gas swap leaves unused.
 const MT_TRANSFER_MIN_GAS: Gas = Gas::from_tgas(10); // the live call used 4.09
-// Shares of swap's unused gas: all of it to mt_transfer, none to the callback.
-const MT_TRANSFER_GETS_UNUSED_GAS: GasWeight = GasWeight(1);
+// Shares of swap's and transfer_to_owner's unused gas: all of it to the intents.near call, none
+// to the callback.
+const INTENTS_CALL_GETS_UNUSED_GAS: GasWeight = GasWeight(1);
 const CALLBACK_GETS_NO_UNUSED_GAS: u64 = 0;
 // swap's own work, which burns about 3 Tgas with the real quote.
 const SWAP_OWN_GAS: Gas = Gas::from_tgas(10);
 // The least prepaid gas swap accepts.
 const GAS_FOR_SWAP: Gas =
     Gas::from_tgas(MT_TRANSFER_MIN_GAS.as_tgas() + CALLBACK_GAS.as_tgas() + SWAP_OWN_GAS.as_tgas());
+// mt_batch_transfer gets at least BASE + PER_TOKEN for each token, plus all the gas
+// transfer_to_owner leaves unused. About twice what the mainnet intents.near wasm burnt in the
+// sandbox (2026-10-23): 3.8 Tgas for 1 token, 6.1 for 5, 9.1 for 10.
+const MT_BATCH_TRANSFER_BASE_GAS: Gas = Gas::from_tgas(8);
+const MT_BATCH_TRANSFER_GAS_PER_TOKEN: Gas = Gas::from_tgas(1);
+// transfer_to_owner's own work.
+const TRANSFER_TO_OWNER_OWN_GAS: Gas = Gas::from_tgas(10);
+// Our cap, which keeps the gas within what was measured. intents.near's own BATCH_MAX_TOKENS (10)
+// doesn't apply to a plain mt_batch_transfer, which took 11 tokens in the sandbox.
+const MAX_TRANSFER_TOKENS: usize = 10;
 const CONTRACT_VERSION: &str = "1.0.0"; // Semver of the interface. Bumps every release.
 const STATE_VERSION: u8 = 1; // The shape of STATE. Bumps only when its Borsh bytes change.
 // v0 state has no version byte. Its first byte is the low byte of owner_id's length, and every
@@ -46,6 +59,19 @@ const V0_OWNER_LEN: u8 = 64;
 // migrate tells v0 state apart only while no state version can equal V0_OWNER_LEN. Remove the
 // v0 migration, and this assert, once no account runs v0.
 const _: () = assert!(STATE_VERSION < V0_OWNER_LEN);
+
+/// The least gas mt_batch_transfer gets when moving `tokens` tokens.
+fn mt_batch_transfer_min_gas(tokens: usize) -> Gas {
+    MT_BATCH_TRANSFER_BASE_GAS
+        .saturating_add(MT_BATCH_TRANSFER_GAS_PER_TOKEN.saturating_mul(tokens as u64))
+}
+
+/// The least prepaid gas transfer_to_owner accepts when moving `tokens` tokens.
+fn gas_for_transfer_to_owner(tokens: usize) -> Gas {
+    mt_batch_transfer_min_gas(tokens)
+        .saturating_add(CALLBACK_GAS)
+        .saturating_add(TRANSFER_TO_OWNER_OWN_GAS)
+}
 
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
@@ -289,7 +315,7 @@ impl TradingAccountContract {
                 serde_json::to_vec(&args).expect("Internal bug: args always serialize"),
                 env::attached_deposit(),
                 MT_TRANSFER_MIN_GAS,
-                MT_TRANSFER_GETS_UNUSED_GAS,
+                INTENTS_CALL_GETS_UNUSED_GAS,
             )
             .then(
                 Self::ext(env::current_account_id())
@@ -307,6 +333,74 @@ impl TradingAccountContract {
             env::panic_str("swap: mt_transfer on intents.near failed");
         }
         env::log_str("swap: mt_transfer succeeded");
+    }
+
+    /// Moves `tokens` (token id to amount) from the trading account's intents balance to the
+    /// owner's, inside intents, with one mt_batch_transfer, which is atomic: every token moves or
+    /// none does. The receiver is always the owner, so there's no allowlist or cap. The owner or
+    /// an agent, with exactly 1 yoctoNEAR attached, which is forwarded, and 1 to 10 tokens, none
+    /// with a zero amount. mt_batch_transfer gets all the gas this doesn't use.
+    #[payable]
+    pub fn transfer_to_owner(
+        &mut self,
+        tokens: BTreeMap<String, U128>,
+        memo: Option<String>,
+    ) -> Promise {
+        near_sdk::assert_one_yocto();
+        let caller = env::predecessor_account_id();
+        assert!(
+            caller == self.owner_id || self.agents.contains(&caller),
+            "Unauthorized: only the owner or an agent can transfer to the owner"
+        );
+        assert!(
+            (1..=MAX_TRANSFER_TOKENS).contains(&tokens.len()),
+            "tokens must have 1 to {} entries",
+            MAX_TRANSFER_TOKENS
+        );
+        if let Some((token_id, _)) = tokens.iter().find(|(_, amount)| amount.0 == 0) {
+            env::panic_str(&format!("Amount of {} must be above 0", token_id));
+        }
+        let prepaid = env::prepaid_gas();
+        let needed = gas_for_transfer_to_owner(tokens.len());
+        assert!(
+            prepaid >= needed,
+            "Not enough gas attached. Please attach at least {} TGas. Attached: {} TGas",
+            needed.as_tgas(),
+            prepaid.as_tgas()
+        );
+
+        let (token_ids, amounts): (Vec<String>, Vec<U128>) = tokens.into_iter().unzip();
+        let args = serde_json::json!({
+            "receiver_id": self.owner_id,
+            "token_ids": token_ids,
+            "amounts": amounts,
+            "memo": memo,
+        });
+        env::log_str(&format!("transfer_to_owner: mt_batch_transfer {}", args));
+        Promise::new(NEAR_INTENTS_ADDRESS.to_owned())
+            .function_call_weight(
+                "mt_batch_transfer".to_string(),
+                serde_json::to_vec(&args).expect("Internal bug: args always serialize"),
+                env::attached_deposit(),
+                mt_batch_transfer_min_gas(token_ids.len()),
+                INTENTS_CALL_GETS_UNUSED_GAS,
+            )
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(CALLBACK_GAS)
+                    .with_unused_gas_weight(CALLBACK_GETS_NO_UNUSED_GAS)
+                    .transfer_to_owner_callback(),
+            )
+    }
+
+    /// transfer_to_owner's callback. Fails the caller's transaction when mt_batch_transfer
+    /// failed, so the failure can't be missed.
+    #[private]
+    pub fn transfer_to_owner_callback(&self) {
+        if !near_sdk::is_promise_success() {
+            env::panic_str("transfer_to_owner: mt_batch_transfer on intents.near failed");
+        }
+        env::log_str("transfer_to_owner: mt_batch_transfer succeeded");
     }
 
     pub fn add_full_access_key(&mut self, public_key: PublicKey) -> Promise {
