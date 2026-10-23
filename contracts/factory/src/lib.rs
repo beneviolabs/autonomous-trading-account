@@ -201,8 +201,9 @@ impl TradingAccountFactory {
     }
 }
 
-/// Arguments of the trading account's `new(owner_id, signer_id)`. Nothing checks at compile time
-/// that they match `TradingAccountContract::new` in contracts/trading-account.
+/// Arguments of the trading account's `new`. Nothing checks at compile time that they match
+/// `TradingAccountContract::new` in contracts/trading-account. v0 needs both; 1.0.0 reads only
+/// `owner_id` and ignores `signer_id`. Drop `signer_id` once no factory points at v0 code.
 #[derive(Serialize)]
 #[serde(crate = "near_sdk::serde")]
 struct TradingAccountInitArgs {

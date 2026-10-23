@@ -1,53 +1,42 @@
 use near_sdk::base64;
 use near_sdk::borsh::BorshDeserialize;
 use near_sdk::collections::UnorderedSet;
-
-use near_sdk::json_types::{Base58CryptoHash, U64};
-use near_sdk::serde::Deserialize;
+use near_sdk::json_types::Base58CryptoHash;
 use near_sdk::{
-    AccountId, AccountIdRef, Gas, NearToken, PanicOnDefault, Promise, PromiseError, PublicKey, env,
+    AccountId, AccountIdRef, Gas, GasWeight, NearToken, PanicOnDefault, Promise, PublicKey, env,
     near,
 };
 
-use omni_transaction::TransactionBuilder;
-use omni_transaction::TxBuilder;
-use omni_transaction::near::types::Secp256K1Signature;
-use omni_transaction::near::utils::PublicKeyStrExt;
-use omni_transaction::{
-    NEAR,
-    near::NearTransaction,
-    near::types::{
-        Action as OmniAction, BlockHash as OmniBlockHash,
-        FunctionCallAction as OmniFunctionCallAction, PublicKey as OmniPublicKey,
-        Secp256K1PublicKey, Signature,
-    },
-};
-
 pub use crate::models::*;
+use crate::quote::SignedQuote;
 
-mod actions;
 #[cfg(all(test, feature = "integration-tests"))]
 mod integration_tests;
 mod models;
-#[cfg(test)]
-mod test_support;
+mod quote;
 #[cfg(test)]
 mod unit_tests;
 mod utils;
 
-const GAS_FOR_REQUEST_SIGNATURE: Gas = Gas::from_tgas(100);
-const BASE_GAS: Gas = Gas::from_tgas(10); // Base gas for contract execution
-const CALLBACK_GAS: Gas = Gas::from_tgas(10); // Gas reserved for callback
+const ADD_PUBLIC_KEY_GAS: Gas = Gas::from_tgas(10); // intents.near's add_public_key
+const CALLBACK_GAS: Gas = Gas::from_tgas(10); // swap_callback's gas
 // migrate's budget. With 10 agents it burns about 3 Tgas (release-gate tests, 2026-10-08); the
 // rest is headroom for later migrations, which chain every version since the account's.
 const MIGRATE_GAS: Gas = Gas::from_tgas(50);
 const FACTORY_VIEW_GAS: Gas = Gas::from_tgas(5); // The factory's get_proxy_code_base58_hash
 const DO_UPGRADE_GAS: Gas = Gas::from_tgas(60); // do_upgrade's own work plus MIGRATE_GAS, which it hands on
-const NEAR_MPC_DOMAIN_ID: u32 = 0;
 const MAX_AGENTS: u64 = 10; // Maximum number of agents per trading account
-// NEAR accepts a transaction nonce only below block height * this multiplier (nearcore's name).
-const ACCESS_KEY_NONCE_RANGE_MULTIPLIER: u64 = 1_000_000;
 const NEAR_INTENTS_ADDRESS: &AccountIdRef = AccountIdRef::new_or_panic("intents.near");
+// mt_transfer gets at least this much, plus all the gas swap leaves unused.
+const MT_TRANSFER_MIN_GAS: Gas = Gas::from_tgas(10); // the live call used 4.09
+// Shares of swap's unused gas: all of it to mt_transfer, none to the callback.
+const MT_TRANSFER_GETS_UNUSED_GAS: GasWeight = GasWeight(1);
+const CALLBACK_GETS_NO_UNUSED_GAS: u64 = 0;
+// swap's own work, which burns about 3 Tgas with the real quote.
+const SWAP_OWN_GAS: Gas = Gas::from_tgas(10);
+// The least prepaid gas swap accepts.
+const GAS_FOR_SWAP: Gas =
+    Gas::from_tgas(MT_TRANSFER_MIN_GAS.as_tgas() + CALLBACK_GAS.as_tgas() + SWAP_OWN_GAS.as_tgas());
 const CONTRACT_VERSION: &str = "1.0.0"; // Semver of the interface. Bumps every release.
 const STATE_VERSION: u8 = 1; // The shape of STATE. Bumps only when its Borsh bytes change.
 // v0 state has no version byte. Its first byte is the low byte of owner_id's length, and every
@@ -65,7 +54,6 @@ pub struct TradingAccountContract {
     state_version: u8,
     owner_id: AccountId,
     agents: UnorderedSet<AccountId>,
-    signer_id: AccountId,
 }
 
 // v0's layout, kept only so migrate can read v0 state.
@@ -74,31 +62,20 @@ pub struct TradingAccountContract {
 struct StateV0 {
     owner_id: AccountId,
     authorized_users: UnorderedSet<AccountId>,
+    #[allow(dead_code)] // Read only to get past it; migrate drops it.
     signer_id: AccountId,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(tag = "type")]
-pub enum ActionString {
-    FunctionCall {
-        method_name: String,
-        args: serde_json::Value,
-        gas: String,
-        deposit: String,
-    },
 }
 
 #[near]
 impl TradingAccountContract {
     #[init]
-    pub fn new(owner_id: AccountId, signer_id: AccountId) -> Self {
+    pub fn new(owner_id: AccountId) -> Self {
         assert!(!env::state_exists(), "Contract is already initialized");
 
         Self {
             state_version: STATE_VERSION,
             owner_id,
             agents: UnorderedSet::new(b"a"),
-            signer_id,
         }
     }
 
@@ -130,11 +107,11 @@ impl TradingAccountContract {
                     .unwrap_or_else(|_| env::panic_str("v0 unreadable"));
                 let agents = v0.authorized_users.to_vec();
                 // The set is moved, not rebuilt, so its prefix and stored agents don't change.
+                // v0's signer_id is dropped: swap needs no MPC signer.
                 let migrated = Self {
                     state_version: STATE_VERSION,
                     owner_id: v0.owner_id,
                     agents: v0.authorized_users,
-                    signer_id: v0.signer_id,
                 };
                 (0, migrated, agents)
             }
@@ -245,15 +222,6 @@ impl TradingAccountContract {
         self.owner_id.clone()
     }
 
-    pub fn get_signer_id(&self) -> AccountId {
-        self.signer_id.clone()
-    }
-
-    pub fn set_signer_id(&mut self, signer_id: AccountId) {
-        self.assert_owner();
-        self.signer_id = signer_id;
-    }
-
     // Helper methods
     // The factory only creates direct subaccounts, so the parent is the factory. Derived, never
     // stored or taken from a caller.
@@ -272,198 +240,73 @@ impl TradingAccountContract {
         );
     }
 
-    /// Validate and build OmniActions from ActionString inputs
-    fn validate_and_build_actions(
-        &self,
-        actions: Vec<ActionString>,
-        contract_id: &AccountId,
-    ) -> Result<Vec<OmniAction>, String> {
-        if actions.is_empty() {
-            return Err("Actions cannot be empty. At least one action is required.".to_string());
-        }
-
-        actions
-            .into_iter()
-            .map(|action| match action {
-                ActionString::FunctionCall {
-                    method_name,
-                    args,
-                    gas,
-                    deposit,
-                } => {
-                    let gas = Gas::from_gas(gas.parse().map_err(|_| "Invalid gas format")?);
-                    let deposit_near = NearToken::from_yoctonear(
-                        deposit.parse().map_err(|_| "Invalid deposit format")?,
-                    );
-                    actions::check_allowlist(contract_id, &method_name)?;
-
-                    let args_bytes = serde_json::to_vec(&args)
-                        .map_err(|e| format!("Failed to serialize args: {}", e))?;
-
-                    Ok(OmniAction::FunctionCall(Box::new(OmniFunctionCallAction {
-                        method_name,
-                        args: args_bytes,
-                        gas,
-                        deposit: deposit_near,
-                    })))
-                }
-            })
-            .collect()
-    }
-
-    /// Create signature request from transaction and required parameters
-    fn create_signature_request(
-        &self,
-        tx: &NearTransaction,
-        derivation_path: String,
-    ) -> serde_json::Value {
-        let hashed_payload = utils::hash_payload(&tx.build_for_signing());
-
-        let sign_request = SignRequest {
-            payload_v2: EcdsaPayload {
-                ecdsa: hex::encode(hashed_payload),
-            },
-            path: derivation_path,
-            domain_id: NEAR_MPC_DOMAIN_ID, // 0 is secp256k1, the only domain the signature check supports
-        };
-
-        serde_json::json!({ "request": sign_request })
-    }
-
-    // Request a signature from the MPC signer
+    /// Deposits into a 1Click quote by calling intents.near's mt_transfer directly, so intents.near
+    /// sees the trading account as the sender and no transaction is signed for it. The transfer
+    /// comes from the quote alone: its depositAddress, originAsset and amountIn. The owner or an
+    /// agent, with exactly 1 yoctoNEAR attached, which is forwarded to mt_transfer, and at least
+    /// GAS_FOR_SWAP prepaid. mt_transfer gets all the gas swap doesn't use.
     #[payable]
-    pub fn request_signature(
-        &mut self,
-        contract_id: AccountId,
-        actions_json: String,
-        nonce: U64,
-        block_hash: Base58CryptoHash,
-        mpc_signer_pk: String,
-        derivation_path: String,
-    ) -> Promise {
-        let attached_gas = env::prepaid_gas();
+    pub fn swap(&mut self, quote_payload: String, quote_signature: String) -> Promise {
+        near_sdk::assert_one_yocto();
+        let caller = env::predecessor_account_id();
         assert!(
-            attached_gas >= GAS_FOR_REQUEST_SIGNATURE,
+            caller == self.owner_id || self.agents.contains(&caller),
+            "Unauthorized: only the owner or an agent can swap"
+        );
+        let prepaid = env::prepaid_gas();
+        assert!(
+            prepaid >= GAS_FOR_SWAP,
             "Not enough gas attached. Please attach at least {} TGas. Attached: {} TGas",
-            GAS_FOR_REQUEST_SIGNATURE.as_tgas(),
-            attached_gas.as_tgas()
+            GAS_FOR_SWAP.as_tgas(),
+            prepaid.as_tgas()
         );
+        let quote = SignedQuote {
+            payload: quote_payload,
+            signature: quote_signature,
+        };
+        let terms =
+            quote::verify(&quote, &quote::trusted_keys()).unwrap_or_else(|e| env::panic_str(&e));
+        terms
+            .check(
+                &[env::current_account_id(), self.owner_id.clone()],
+                env::block_timestamp_ms(),
+            )
+            .unwrap_or_else(|e| env::panic_str(&e));
+        // check passes only live quotes, and a live quote always has one.
+        let deposit_address = terms
+            .deposit_address
+            .unwrap_or_else(|| env::panic_str("Quote has no depositAddress"));
 
-        assert!(
-            self.agents.contains(&env::predecessor_account_id()),
-            "Unauthorized: only agents can request signatures"
-        );
-
-        // A nonce for a future block makes a transaction that only becomes valid later, so it could
-        // outlive delete_key plus re-adding the key. A re-added key starts above this limit.
-        assert!(
-            nonce.0 < env::block_height() * ACCESS_KEY_NONCE_RANGE_MULTIPLIER,
-            "Invalid nonce: must be below the current block height × {}",
-            ACCESS_KEY_NONCE_RANGE_MULTIPLIER
-        );
-
-        // Parse actions from JSON string
-        let actions: Vec<ActionString> = serde_json::from_str(&actions_json).unwrap_or_else(|e| {
-            near_sdk::env::panic_str(&format!("Failed to parse actions JSON: {:?}", e))
+        let args = serde_json::json!({
+            "receiver_id": deposit_address,
+            "token_id": terms.origin_asset,
+            "amount": terms.amount_in,
         });
-
-        near_sdk::env::log_str(&format!(
-            "Request received - Contract: {}, Actions: {:?}, Nonce: {}, Block Hash: {:?}",
-            contract_id, actions, nonce.0, block_hash
-        ));
-
-        // Validate MPC public key early
-        let mpc_public_key = match mpc_signer_pk.to_public_key() {
-            Ok(pk) => pk,
-            Err(e) => {
-                near_sdk::env::panic_str(&format!("Invalid MPC public key format: {}", e));
-            }
-        };
-
-        // Validate and build OmniActions
-        let omni_actions = match self.validate_and_build_actions(actions, &contract_id) {
-            Ok(actions) => actions,
-            Err(e) => {
-                near_sdk::env::panic_str(&format!(
-                    "Failed to validate and build OmniActions: {:?}",
-                    e
-                ));
-            }
-        };
-
-        // construct the entire transaction to be signed
-        let tx = TransactionBuilder::new::<NEAR>()
-            .signer_id(env::current_account_id().to_string())
-            .signer_public_key(mpc_public_key)
-            .nonce(nonce.0) // Use the provided nonce
-            .receiver_id(contract_id.to_string())
-            .block_hash(OmniBlockHash(block_hash.into()))
-            .actions(omni_actions.clone())
-            .build();
-
-        // Log transaction details
-        near_sdk::env::log_str(&format!(
-            "Transaction details before signing:
-            - Signer ID: {}
-            - Receiver ID: {}
-            - derivation_path: {}
-            - Signer Public Key: {}
-            - Number of Actions: {}",
-            tx.signer_id,
-            tx.receiver_id,
-            derivation_path,
-            mpc_signer_pk,
-            tx.actions.len()
-        ));
-
-        // Serialize transaction into a string to pass into callback
-        let tx_json_string = serde_json::to_string(&tx)
-            .expect("Internal bug: transaction serialization should never fail");
-
-        near_sdk::env::log_str(&format!(
-            "Transaction details - Receiver: {}, Signer: {}, Actions: {:?}, Nonce: {}, BlockHash: {:?}",
-            contract_id,
-            env::current_account_id(),
-            omni_actions,
-            nonce.0,
-            block_hash
-        ));
-
-        // Create signature request
-        let request_payload = self.create_signature_request(&tx, derivation_path.clone());
-
-        let request_payload_bytes = match near_sdk::serde_json::to_vec(&request_payload) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                near_sdk::env::panic_str(&format!("Failed to serialize request payload: {}", e));
-            }
-        };
-
-        let used_gas = near_sdk::env::used_gas();
-        let gas_for_signing = attached_gas
-            .saturating_sub(BASE_GAS)
-            .saturating_sub(used_gas)
-            .saturating_sub(CALLBACK_GAS);
-
-        near_sdk::env::log_str(&format!(
-            "Used gas: {}, gas reserved for MPC call: {}",
-            used_gas.as_tgas(),
-            gas_for_signing.as_tgas()
-        ));
-
-        // Call MPC requesting a signature for the above txn
-        Promise::new(self.signer_id.clone())
-            .function_call(
-                "sign".to_string(),
-                request_payload_bytes,
+        env::log_str(&format!("swap: mt_transfer {}", args));
+        Promise::new(NEAR_INTENTS_ADDRESS.to_owned())
+            .function_call_weight(
+                "mt_transfer".to_string(),
+                serde_json::to_vec(&args).expect("Internal bug: args always serialize"),
                 env::attached_deposit(),
-                gas_for_signing,
+                MT_TRANSFER_MIN_GAS,
+                MT_TRANSFER_GETS_UNUSED_GAS,
             )
             .then(
                 Self::ext(env::current_account_id())
                     .with_static_gas(CALLBACK_GAS)
-                    .sign_request_callback(tx_json_string),
+                    .with_unused_gas_weight(CALLBACK_GETS_NO_UNUSED_GAS)
+                    .swap_callback(),
             )
+    }
+
+    /// swap's callback. Fails the agent's transaction when mt_transfer failed, so the failure
+    /// can't be missed.
+    #[private]
+    pub fn swap_callback(&self) {
+        if !near_sdk::is_promise_success() {
+            env::panic_str("swap: mt_transfer on intents.near failed");
+        }
+        env::log_str("swap: mt_transfer succeeded");
     }
 
     pub fn add_full_access_key(&mut self, public_key: PublicKey) -> Promise {
@@ -471,9 +314,8 @@ impl TradingAccountContract {
         Promise::new(env::current_account_id()).add_full_access_key(public_key)
     }
 
-    /// Deletes `public_key` from the trading account. Deleting the MPC key invalidates every
-    /// transaction it already signed that hasn't been broadcast. Owner only, with exactly 1 yoctoNEAR
-    /// attached so the owner must sign with a full-access key.
+    /// Deletes `public_key` from the trading account, such as the MPC key 1.0.0 no longer needs.
+    /// Owner only, with exactly 1 yoctoNEAR attached so the owner must sign with a full-access key.
     #[payable]
     pub fn delete_key(&mut self, public_key: PublicKey) -> Promise {
         self.assert_owner();
@@ -498,101 +340,8 @@ impl TradingAccountContract {
                 near_sdk::serde_json::to_vec(&request_payload)
                     .expect("Failed to serialize public key payload"),
                 env::attached_deposit(),
-                BASE_GAS,
+                ADD_PUBLIC_KEY_GAS,
             ),
         )
-    }
-
-    #[private] // Only callable by the contract itself
-    pub fn sign_request_callback(
-        &mut self,
-        #[callback_result] call_result: Result<EcdsaSignatureResponse, PromiseError>,
-        tx_json_string: String,
-    ) -> String {
-        let response = match call_result {
-            Ok(response) => {
-                near_sdk::env::log_str(&format!(
-                    "Parsed the MPC's Signature response: {:?}",
-                    response
-                ));
-                response
-            }
-            Err(e) => {
-                near_sdk::env::panic_str(&format!(
-                    "Failed to parse the MPC's Signature response: {:?}",
-                    e
-                ));
-            }
-        };
-
-        // Deserialize transaction that we serialized in request_signature
-        let near_tx = serde_json::from_str::<NearTransaction>(&tx_json_string)
-            .expect("Internal bug: failed to deserialize our own transaction JSON");
-
-        let message_hash = utils::hash_payload(&near_tx.build_for_signing());
-        near_sdk::env::log_str(&format!("Message hash: {}", hex::encode(message_hash)));
-
-        // Handle different signature formats
-        let omni_signature = {
-            near_sdk::env::log_str("Using SECP256K1 signature format");
-            // Convert signature components
-            let r = hex::decode(&response.big_r.affine_point[2..]).expect("Invalid hex in r");
-            let s = hex::decode(&response.s.scalar).expect("Invalid hex in s");
-            let v = response.recovery_id;
-
-            // Combine r and s for verification
-            let mut signature = Vec::with_capacity(64);
-            signature.extend_from_slice(&r);
-            signature.extend_from_slice(&s);
-
-            // Verify signature: it must recover to the key the transaction is signed for
-            let Some(recovered_key) = self.recover_key(message_hash.to_vec(), signature, v) else {
-                near_sdk::env::log_str("Signature verification failed!");
-                near_sdk::env::panic_str("Invalid signature: ecrecover failed");
-            };
-            match &near_tx.signer_public_key {
-                OmniPublicKey::SECP256K1(Secp256K1PublicKey(tx_key))
-                    if *tx_key == recovered_key =>
-                {
-                    near_sdk::env::log_str(&format!(
-                        "Signature verified! Recovered public key: {}",
-                        near_tx.signer_public_key
-                    ));
-                }
-                _ => near_sdk::env::panic_str(
-                    "Invalid signature: recovered key doesn't match the transaction's public key",
-                ),
-            }
-
-            // Add individual bytes together in the correct order
-            let mut signature_bytes = [0u8; 65];
-            signature_bytes[..32].copy_from_slice(&r);
-            signature_bytes[32..64].copy_from_slice(&s);
-            signature_bytes[64] = v;
-
-            // Create signature
-            Signature::SECP256K1(Secp256K1Signature(signature_bytes))
-        };
-
-        near_sdk::env::log_str(&format!("constructed omni signature: {:?}", omni_signature));
-
-        // Add signature to transaction
-        let near_tx_signed = near_tx.build_with_signature(omni_signature);
-
-        let base64_tx =
-            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &near_tx_signed);
-        near_sdk::env::log_str(&format!("Signed transaction (base64): {}", base64_tx));
-
-        base64_tx
-    }
-
-    fn recover_key(&self, hash: Vec<u8>, signature: Vec<u8>, v: u8) -> Option<[u8; 64]> {
-        let recovered: Option<[u8; 64]> = env::ecrecover(&hash, &signature, v, true);
-
-        env::log_str(&format!("Hash: {}", hex::encode(&hash)));
-        env::log_str(&format!("Signature: {}", hex::encode(&signature)));
-        env::log_str(&format!("V: {}", v));
-
-        recovered
     }
 }
