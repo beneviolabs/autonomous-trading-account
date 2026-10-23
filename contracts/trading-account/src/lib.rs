@@ -73,6 +73,17 @@ fn gas_for_transfer_to_owner(tokens: usize) -> Gas {
         .saturating_add(TRANSFER_TO_OWNER_OWN_GAS)
 }
 
+/// Panics unless at least `needed` gas was prepaid.
+fn assert_prepaid_gas(needed: Gas) {
+    let prepaid = env::prepaid_gas();
+    assert!(
+        prepaid >= needed,
+        "Not enough gas attached. Please attach at least {} TGas. Attached: {} TGas",
+        needed.as_tgas(),
+        prepaid.as_tgas()
+    );
+}
+
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
 pub struct TradingAccountContract {
@@ -266,6 +277,17 @@ impl TradingAccountContract {
         );
     }
 
+    /// Panics unless the caller is the owner or an agent, naming the refused `action`.
+    fn assert_owner_or_agent(&self, action: &str) {
+        let caller = env::predecessor_account_id();
+        if caller != self.owner_id && !self.agents.contains(&caller) {
+            env::panic_str(&format!(
+                "Unauthorized: only the owner or an agent can {}",
+                action
+            ));
+        }
+    }
+
     /// Deposits into a 1Click quote by calling intents.near's mt_transfer directly, so intents.near
     /// sees the trading account as the sender and no transaction is signed for it. The transfer
     /// comes from the quote alone: its depositAddress, originAsset and amountIn. The owner or an
@@ -274,18 +296,8 @@ impl TradingAccountContract {
     #[payable]
     pub fn swap(&mut self, quote_payload: String, quote_signature: String) -> Promise {
         near_sdk::assert_one_yocto();
-        let caller = env::predecessor_account_id();
-        assert!(
-            caller == self.owner_id || self.agents.contains(&caller),
-            "Unauthorized: only the owner or an agent can swap"
-        );
-        let prepaid = env::prepaid_gas();
-        assert!(
-            prepaid >= GAS_FOR_SWAP,
-            "Not enough gas attached. Please attach at least {} TGas. Attached: {} TGas",
-            GAS_FOR_SWAP.as_tgas(),
-            prepaid.as_tgas()
-        );
+        self.assert_owner_or_agent("swap");
+        assert_prepaid_gas(GAS_FOR_SWAP);
         let quote = SignedQuote {
             payload: quote_payload,
             signature: quote_signature,
@@ -347,11 +359,7 @@ impl TradingAccountContract {
         memo: Option<String>,
     ) -> Promise {
         near_sdk::assert_one_yocto();
-        let caller = env::predecessor_account_id();
-        assert!(
-            caller == self.owner_id || self.agents.contains(&caller),
-            "Unauthorized: only the owner or an agent can transfer to the owner"
-        );
+        self.assert_owner_or_agent("transfer to the owner");
         assert!(
             (1..=MAX_TRANSFER_TOKENS).contains(&tokens.len()),
             "tokens must have 1 to {} entries",
@@ -360,14 +368,7 @@ impl TradingAccountContract {
         if let Some((token_id, _)) = tokens.iter().find(|(_, amount)| amount.0 == 0) {
             env::panic_str(&format!("Amount of {} must be above 0", token_id));
         }
-        let prepaid = env::prepaid_gas();
-        let needed = gas_for_transfer_to_owner(tokens.len());
-        assert!(
-            prepaid >= needed,
-            "Not enough gas attached. Please attach at least {} TGas. Attached: {} TGas",
-            needed.as_tgas(),
-            prepaid.as_tgas()
-        );
+        assert_prepaid_gas(gas_for_transfer_to_owner(tokens.len()));
 
         let (token_ids, amounts): (Vec<String>, Vec<U128>) = tokens.into_iter().unzip();
         let args = serde_json::json!({
