@@ -24,7 +24,6 @@ The per-user contract, created by the [factory](factory.md) at `implicit_<24hex>
   - It can swap at bad prices on illiquid tokens, or swap back and forth, losing fees and up to 2% slippage each time. The contract has no price oracle.
   - A compromised 1Click key would get past the quote check entirely.
 - **Keys registered on `intents.near` bypass the contract.** Any public key registered for the trading account on `intents.near` can sign intents that move its balance anywhere. `delete_key` doesn't unregister a key; that takes `intents.near`'s `remove_public_key`, called by the account.
-- **Delete the MPC key after upgrading.** Accounts on v0 hold an MPC key with full access, which their agents' transactions were signed with. 1.0.0 doesn't use it, so the owner should delete it with `delete_key`, and unregister it from `intents.near` if it's registered there.
 - **Only upgraded accounts get these checks.** Trading accounts on v0 have no `swap`, and sign any call on v0's wider allowlist, including `ft_withdraw` and `mt_transfer` to any receiver.
 - **To cut off an agent**, remove it with `remove_agent`. It takes effect at once.
 - The checks are compiled in. Changing them means [releasing new trading account code](releases.md#release-trading-account-code), and existing trading accounts keep their old code until their owner [upgrades them](#upgrading-a-trading-account).
@@ -93,7 +92,7 @@ The trading account code deployed now (see the [README](../README.md#deployments
 
 ## Upgrading a trading account
 
-A [release](releases.md#release-trading-account-code) changes only the code of trading accounts created afterwards. An existing account keeps its code until its owner upgrades it to the code the factory points at. The upgrade switches the code and runs `migrate` in one receipt, so if `migrate` fails the account keeps its old code and state. The agents and the owner carry over. Upgrading from v0 drops the MPC signer from the state; the MPC key stays on the account until the owner deletes it (see the [security model](#security-model)).
+A [release](releases.md#release-trading-account-code) changes only the code of trading accounts created afterwards. An existing account keeps its code until its owner upgrades it to the code the factory points at. The upgrade switches the code and runs `migrate` in one receipt, so if `migrate` fails the account keeps its old code and state. The agents and the owner carry over. Upgrading from v0 drops the MPC signer from the state; the MPC key stays on the account.
 
 Get the hash the account's own factory (its parent) points at, and check it matches the hash in the version's [GitHub Release](releases.md#versions):
 ```bash

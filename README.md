@@ -32,7 +32,7 @@ agent ──swap(1Click quote)──▶ trading account ──mt_transfer──�
 
 - **Owner**: the user's NEAR implicit account (64 hex chars). It creates and controls its trading account.
 - **Agent**: an account allowed to call `swap`. At most 10 per trading account.
-- **MPC key**: the key NEAR's MPC signer derives for a trading account. Trading accounts on v0 have it as a full-access key, and it signs their agents' transactions. From 1.0.0 nothing signs for the trading account, and owners should delete it.
+- **MPC key**: the key NEAR's MPC signer derives for a trading account. Trading accounts on v0 have it as a full-access key, and it signs their agents' transactions. From 1.0.0 nothing signs for the trading account.
 - **Global code hash**: the hash of the trading account code deployed once as a [NEP-591 global contract](https://github.com/near/NEPs/blob/master/neps/nep-0591.md). The factory creates new trading accounts with it.
 
 Some on-chain names still say "proxy" for the trading account: factory methods such as `create_proxy_global`, the factory's `global_proxy_base58_hash` argument, and some log messages. Code identifiers use the terms above.

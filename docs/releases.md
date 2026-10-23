@@ -56,7 +56,7 @@ GitHub Releases are kept forever, unlike CI artifacts (90 days), so each release
 
 ### 1.0.0
 
-The first versioned release, and the first `upgrade` and `migrate`. Agents swap with `swap(quote_payload, quote_signature)`, which deposits into a 1Click quote with a direct `mt_transfer` call. `request_signature`, the MPC signing path, `get_signer_id` and `set_signer_id` are gone, and migrating from v0 drops `signer_id` from the state. After upgrading, owners should delete the MPC key ([security model](trading-account.md#security-model)).
+The first versioned release, and the first `upgrade` and `migrate`. Agents swap with `swap(quote_payload, quote_signature)`, which deposits into a 1Click quote with a direct `mt_transfer` call. `request_signature`, the MPC signing path, `get_signer_id` and `set_signer_id` are gone, and migrating from v0 drops `signer_id` from the state.
 
 ## Which release do I need?
 
