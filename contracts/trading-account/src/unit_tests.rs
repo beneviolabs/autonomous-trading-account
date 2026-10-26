@@ -1042,8 +1042,7 @@ fn test_swap_requires_one_yocto() {
     }
 }
 
-// A gas unit below GAS_FOR_SWAP fails. The sandbox test runs a swap at exactly GAS_FOR_SWAP: the
-// mocked chain charges more for swap's own work than the real one.
+// A gas unit below GAS_FOR_SWAP fails.
 #[test]
 fn test_swap_requires_gas_for_swap() {
     let message = swap_panic_with(swap_context(

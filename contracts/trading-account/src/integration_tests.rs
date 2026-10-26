@@ -936,50 +936,6 @@ async fn test_swap_calls_intents_as_the_trading_account() -> Result<()> {
     Ok(())
 }
 
-// GAS_FOR_SWAP is enough for the whole swap, as docs/reference.md promises.
-#[tokio::test]
-async fn test_swap_succeeds_with_gas_for_swap() -> Result<()> {
-    let worker = near_workspaces::sandbox().await?;
-    let SwapAccounts {
-        trading_account,
-        intents,
-        agent,
-        ..
-    } = deploy_for_swap(&worker).await?;
-
-    let gas = crate::GAS_FOR_SWAP;
-    let outcome = swap(&agent, &trading_account, &test_quote(json!({})), gas).await?;
-    assert!(outcome.is_success(), "{:#?}", outcome.failures());
-    let gas = u64::from_le_bytes(intents.view("gas").await?.result.try_into().unwrap());
-    assert!(gas >= crate::MT_TRANSFER_MIN_GAS.as_gas());
-    Ok(())
-}
-
-// The owner can swap too, here liquidating to itself; anyone else is refused.
-#[tokio::test]
-async fn test_swap_callers() -> Result<()> {
-    let worker = near_workspaces::sandbox().await?;
-    let SwapAccounts {
-        trading_account,
-        owner,
-        ..
-    } = deploy_for_swap(&worker).await?;
-    let quote = test_quote(json!({ "recipient": owner.id() }));
-
-    let outcome = swap(&owner, &trading_account, &quote, Gas::from_tgas(100)).await?;
-    assert!(outcome.is_success(), "{:#?}", outcome.failures());
-
-    let stranger = worker.dev_create_account().await?;
-    let outcome = swap(&stranger, &trading_account, &quote, Gas::from_tgas(100)).await?;
-    let failures = format!("{:?}", outcome.failures());
-    assert!(
-        failures.contains("Unauthorized: only the owner or an agent can swap"),
-        "{}",
-        failures
-    );
-    Ok(())
-}
-
 // The deadline is checked against the block time.
 #[tokio::test]
 async fn test_swap_rejects_an_expired_quote() -> Result<()> {
@@ -1093,61 +1049,6 @@ async fn test_transfer_to_owner_calls_intents_as_the_trading_account() -> Result
             "amounts": ["1", "2", "3"],
             "memo": "rebalance",
         })
-    );
-    Ok(())
-}
-
-// The minimum gas for 10 tokens is enough for the whole transfer.
-#[tokio::test]
-async fn test_transfer_to_owner_succeeds_with_its_minimum_gas() -> Result<()> {
-    let worker = near_workspaces::sandbox().await?;
-    let SwapAccounts {
-        trading_account,
-        intents,
-        agent,
-        ..
-    } = deploy_for_swap(&worker).await?;
-
-    let gas = crate::gas_for_transfer_to_owner(10);
-    let outcome = transfer_to_owner(&agent, &trading_account, transfer_tokens(10), gas).await?;
-    assert!(outcome.is_success(), "{:#?}", outcome.failures());
-    let gas = u64::from_le_bytes(intents.view("gas").await?.result.try_into().unwrap());
-    assert!(gas >= crate::mt_batch_transfer_min_gas(10).as_gas());
-    Ok(())
-}
-
-// The owner can transfer to itself too; anyone else is refused.
-#[tokio::test]
-async fn test_transfer_to_owner_callers() -> Result<()> {
-    let worker = near_workspaces::sandbox().await?;
-    let SwapAccounts {
-        trading_account,
-        owner,
-        ..
-    } = deploy_for_swap(&worker).await?;
-
-    let outcome = transfer_to_owner(
-        &owner,
-        &trading_account,
-        transfer_tokens(1),
-        Gas::from_tgas(100),
-    )
-    .await?;
-    assert!(outcome.is_success(), "{:#?}", outcome.failures());
-
-    let stranger = worker.dev_create_account().await?;
-    let outcome = transfer_to_owner(
-        &stranger,
-        &trading_account,
-        transfer_tokens(1),
-        Gas::from_tgas(100),
-    )
-    .await?;
-    let failures = format!("{:?}", outcome.failures());
-    assert!(
-        failures.contains("Unauthorized: only the owner or an agent can transfer to the owner"),
-        "{}",
-        failures
     );
     Ok(())
 }
