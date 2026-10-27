@@ -853,7 +853,7 @@ fn real_quote() -> serde_json::Value {
 }
 
 /// The real quote's terms with a deadline far off and `changes` applied, signed with the test key
-/// scripts/test.sh compiles into the build (ONE_CLICK_TEST_KEY), the way 1Click signs.
+/// `make test-integration` compiles into the build (ONE_CLICK_TEST_KEY), the way 1Click signs.
 fn test_quote(changes: serde_json::Value) -> serde_json::Value {
     let mut payload: serde_json::Value =
         serde_json::from_str(real_quote()["payload"].as_str().unwrap()).unwrap();

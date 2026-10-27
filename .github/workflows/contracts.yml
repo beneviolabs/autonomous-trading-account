@@ -16,7 +16,7 @@ on:
       - 'Makefile'
       - '.github/workflows/**'
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main ]
 
 permissions:
   contents: read
@@ -77,6 +77,9 @@ jobs:
 
       - name: Run clippy
         run: make clippy
+
+      - name: Lint scripts
+        run: make shellcheck
 
       # Unit tests, then a dev build and the sandbox integration tests.
       - name: Run tests
@@ -183,18 +186,8 @@ jobs:
         run: |
           wasm=wasm/trading_account/trading_account.wasm
           hex=$(sha256sum "$wasm" | cut -d' ' -f1)
-          # The bs58 form is what deploy-as-global prints and set_global_code_hash takes.
-          bs58=$(python3 -c '
-          import sys
-          digest = bytes.fromhex(sys.argv[1])
-          n = int.from_bytes(digest, "big")
-          alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-          out = ""
-          while n:
-              n, r = divmod(n, 58)
-              out = alphabet[r] + out
-          print("1" * (len(digest) - len(digest.lstrip(b"\0"))) + out)
-          ' "$hex")
+          source scripts/lib.sh
+          bs58=$(hex_to_bs58 "$hex")
           gh release create "$GITHUB_REF_NAME" "$wasm" --verify-tag \
             --title "Trading account ${GITHUB_REF_NAME#trading-account/v}" \
             --notes "Built reproducibly from $GITHUB_SHA by run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID.

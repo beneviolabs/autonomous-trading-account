@@ -15,7 +15,7 @@ pub const ONE_CLICK_MANAGER_KEYS: &[[u8; 32]] = &[[
 ]];
 
 /// One more key to trust, `ed25519:<base58>`, compiled in from the ONE_CLICK_TEST_KEY environment
-/// variable. Only scripts/test.sh sets it, for the build the sandbox tests run, so they can sign
+/// variable. Only `make test-integration` sets it, for the build the sandbox tests run, so they can sign
 /// their own quotes. Release builds pass no environment into their container
 /// (`passed_env = []`), so they trust 1Click's key alone.
 const TEST_KEY: Option<&str> = option_env!("ONE_CLICK_TEST_KEY");

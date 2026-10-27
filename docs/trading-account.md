@@ -88,7 +88,7 @@ From before the implicit-owner naming and 1.0.0:
 
 The owner adds the new agent with `add_agent` and removes the old one with `remove_agent`, in either order; both can go in one transaction to the trading account.
 
-The trading account code deployed now (see the [README](../README.md#deployments)) predates 1.0.0 until its owner [upgrades it](#upgrading-a-trading-account): it uses `add_authorized_user` and `remove_authorized_user`, signs through the MPC key, and can't delete that key. Removing the old agent still stops it requesting new signatures, but what it already had signed stays valid until it expires, about 24 hours later.
+The trading account code deployed now (`scripts/status.sh` shows it) predates 1.0.0 until its owner [upgrades it](#upgrading-a-trading-account): it uses `add_authorized_user` and `remove_authorized_user`, signs through the MPC key, and can't delete that key. Removing the old agent still stops it requesting new signatures, but what it already had signed stays valid until it expires, about 24 hours later.
 
 ## Upgrading a trading account
 

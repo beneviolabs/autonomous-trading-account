@@ -6,17 +6,17 @@ How both contracts are built, and how new code reaches testnet and mainnet. Acco
 
 | | How | Deploy it? |
 |---|---|---|
-| Release | Trading account: its [GitHub Release](#versions). Factory: the `contract-wasm` artifact from CI. Or `make release` locally. | Yes. Only deploy these. |
-| Dev | `make build`, `contracts/*/build.sh` | No. Tests only. |
+| Release | Trading account: its [GitHub Release](#versions). Factory: the `contract-wasm` artifact from CI. Or `make release` locally. | Yes. Only deploy these. The release scripts download and check them. |
+| Dev | `make build` | No, except onto one account with [`scripts/flash-dev.sh`](runbooks/dev-deploy.md). |
 
 Both write to `contracts/target/near/<crate>/<crate>.wasm`:
 - trading account: `contracts/target/near/trading_account/trading_account.wasm`
 - factory: `contracts/target/near/trading_account_factory/trading_account_factory.wasm`
 
 - **Release builds are reproducible.** They run `cargo near build reproducible-wasm` in NEAR's build image, pinned by digest under `[package.metadata.near.reproducible_build]` in each crate's `Cargo.toml`. The same commit gives the same hash on any machine. The wasm also records the repository, commit and build image (NEP-330), so explorers can verify it against the source.
-- **Get release wasm from CI.** The `contracts` workflow runs `make release`, prints each wasm's SHA-256 (hex and bs58) in its log, and uploads both wasms as the `contract-wasm` artifact, kept for 90 days.
+- **Release wasm comes from CI.** The `contracts` workflow runs `make release`, prints each wasm's SHA-256 (hex and bs58) in its log, and uploads both wasms as the `contract-wasm` artifact, kept for 90 days. The release scripts take the factory from there, and the trading account from its GitHub Release.
   - CI uploads the artifact only for pushes to `main`, release tags and manual runs. Pull request and other branch runs build and test but don't upload.
-  - Mainnet releases come from `main`. A manual run on a branch (`gh workflow run contracts.yml --ref <branch>`) is for testnet rehearsals only.
+  - Mainnet releases come from `main`. A manual run on a branch (`gh workflow run contracts.yml --ref <branch>`) is for testnet and dev only.
   - CI runs on pull requests and on pushes to `main` that touch contract files. Otherwise, start a run with `gh workflow run contracts.yml --ref main`.
 - **`make release` locally** needs Docker and a clean tree with everything committed, including `Cargo.lock`. NEAR's build images are x86-only, so on Apple Silicon Docker emulates them and the build is slow. Use it to check a CI hash independently, not as the usual route.
 - **To change the build image**, update `image` and `image_digest` in both crates together. That changes both hashes.
@@ -30,16 +30,11 @@ The toolchain is Rust 1.97.1, in `rust-toolchain.toml` and in the release image 
 - cargo-near only allows Rust above 1.86 when near-sdk declares protocol 84 or later as its minimum. near-sdk 5.28+ does, so **don't go back below near-sdk 5.28** without also going back to Rust 1.86.
 - The test sandbox is neard 2.13.4, via `near-workspaces` 0.23.
 
-### What's deployed now
+### v0
 
-Checked 2026-10-01:
+The trading account code that accounts created before 1.0.0 run, global hash `6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f`, has no GitHub Release. It was a native macOS build from before the repo reorg and can't be reproduced, so the release-gate tests use a copy fetched from mainnet, `contracts/trading-account/res/v0.wasm`, and the scripts know its hash as `v0`.
 
-| | Hash | Built from |
-|---|---|---|
-| Trading account global code | `6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f` (hex `59136c3b557222ed2a30f8d02953ab50633566a49c4e107e2314f3a72c19b1f8`) | A native macOS build from before the repo reorg. It can't be reproduced, so the release-gate tests use a copy fetched from mainnet, `contracts/trading-account/res/v0.wasm`. |
-| Factory code, mainnet (prod and dev) and testnet | hex `670ecb8001989c5dd36d8ff96f45bef138f3bac417134c67ac615768c57c4b40` | The old Docker CI build of `a26cd2f` (PR #166) |
-
-The next release build will produce new hashes for both, even for unchanged code, because crate names, paths, the lockfile and the build image all changed in the reorg.
+To see what each factory runs and points at now, run `scripts/status.sh` (or `scripts/status.sh testnet`).
 
 ## Versions
 
@@ -68,215 +63,20 @@ The first versioned release, and the first `upgrade` and `migrate`. Agents swap 
 
 A release never changes an existing trading account by itself. Each keeps its code until its owner [upgrades it](trading-account.md#upgrading-a-trading-account) to the hash the factory points at.
 
-Who's involved on mainnet: the factory owner is the DAO `peerfolio.sputnik-dao.near`, so every change to `auth.peerfolio.near` is a [DAO proposal](#dao-proposals). Proposals need 3 of 4 council approvals, and council members sign with their Ledger. On testnet, the factory owner `peerfolio.peerfolio.testnet` and the factory account `auth.peerfolio.testnet` sign directly from the keychain. The mainnet [dev factory](factory.md#dev-factory) `auth.dev.peerfolio.near` and its owner `dev.peerfolio.near` sign from the keychain too.
-
-## Get the release build
-
-Step 1 of a [factory release](#release-factory-code). Trading account releases come from their [GitHub Release](#versions) instead.
-
-1. Find the CI run for the commit you're releasing. Mainnet releases use a commit on `main`, from a run whose event is `push` or `workflow_dispatch`; check that it succeeded.
-   ```bash
-   export COMMIT=<full release commit SHA>
-   gh run list --workflow contracts.yml --commit $COMMIT --json databaseId,headSha,event,conclusion
-   ```
-   If there's none, start one. A manual run builds the head of the ref you give it, so give it a ref that points at `$COMMIT`: `--ref main` if `$COMMIT` is `main`'s head, otherwise a tag (`git tag release-<name> $COMMIT && git push origin release-<name>`, then `--ref release-<name>`). For a testnet rehearsal of unmerged code, use the branch. Before downloading, check the run's `headSha` is `$COMMIT`:
-   ```bash
-   gh run view <run id> --json headSha,event,conclusion
-   ```
-2. Download the wasms in place of any local builds:
-   ```bash
-   rm -rf contracts/target/near
-   gh run download <run id> -n contract-wasm -D contracts/target/near
-   ```
-3. Record the hashes CI printed, and check the downloaded files match the hex ones:
-   ```bash
-   gh run view <run id> --log | grep "SHA-256 checksum"
-   shasum -a 256 contracts/target/near/*/*.wasm
-   ```
-
-To check a hash independently, run `make release` on a clean checkout of the commit; it should print the same hash.
+Who's involved on mainnet: the factory owner is the DAO `peerfolio.sputnik-dao.near`, so every change to `auth.peerfolio.near` is a [DAO proposal](#dao-proposals). On testnet, the factory owner `peerfolio.peerfolio.testnet` and the factory account `auth.peerfolio.testnet` sign directly from the keychain. The mainnet [dev factory](factory.md#dev-factory) `auth.dev.peerfolio.near` and its owner `dev.peerfolio.near` sign from the keychain too.
 
 ## DAO proposals
 
-Each mainnet change to the factory is one function call on `auth.peerfolio.near`, proposed to the DAO. The release steps give the method and its arguments.
-
-1. Build the proposal. Set your own council account and Ledger path, and the method and arguments from the release step.
-   ```bash
-   export COUNCIL=<your council account>
-   export HD_PATH="m/44'/397'/0'/0'/1'"
-   export METHOD=<method>
-   export ARGS_JSON='<arguments>'
-   export ARGS=$(echo -n "$ARGS_JSON" | base64 | tr -d '\n')
-   export KIND='{"FunctionCall":{"receiver_id":"auth.peerfolio.near","actions":[{"method_name":"'$METHOD'","args":"'$ARGS'","deposit":"0","gas":"15000000000000"}]}}'
-   ```
-2. Submit it. The 0.1 NEAR is the proposal bond. The call returns the proposal ID.
-   ```bash
-   near contract call-function as-transaction peerfolio.sputnik-dao.near add_proposal json-args "{\"proposal\":{\"description\":\"<what and why, with the commit and hash>\",\"kind\":$KIND}}" prepaid-gas '30.0 Tgas' attached-deposit '0.1 NEAR' sign-as $COUNCIL network-config mainnet sign-with-ledger --seed-phrase-hd-path "$HD_PATH" send
-   ```
-3. Check it:
-   ```bash
-   near contract call-function as-read-only peerfolio.sputnik-dao.near get_proposal json-args '{"id":<ID>}' network-config mainnet now
-   ```
-4. Each council member votes. `KIND` must be exactly what was submitted, so share `METHOD` and `ARGS_JSON` with the other voters; they set `ARGS` and `KIND` from them as in step 1.
-   ```bash
-   near contract call-function as-transaction peerfolio.sputnik-dao.near act_proposal json-args "{\"id\":<ID>,\"action\":\"VoteApprove\",\"proposal\":$KIND}" prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' sign-as $COUNCIL network-config mainnet sign-with-ledger --seed-phrase-hd-path "$HD_PATH" send
-   ```
-   The call runs when the third approval comes in.
-
-These commands are adapted from the Peerfolio Backend deploy log of 2026-09-29 and haven't been run as written yet.
+Each mainnet change to the prod factory is one function call on `auth.peerfolio.near`, proposed to the DAO with `scripts/release/dao-propose.sh`. It needs 3 of 4 council approvals, and council members vote however they like, in Trezu or the near CLI.
 
 ## Release trading account code
 
-New trading account code goes out as a new global contract, and the factory is then pointed at its hash. The factory code itself isn't redeployed.
-
-Anyone with a funded account can deploy the global contract. On mainnet that's `peerfolio.near`, and it costs about 40 NEAR for storage; arrange funding or reimbursement first.
-
-### Step 1: Release it on GitHub
-
-1. Merge a PR that bumps `CONTRACT_VERSION` (see [Versions](#versions)).
-2. Tag the merge commit on `main` and push the tag:
-   ```bash
-   export VERSION=<new CONTRACT_VERSION>
-   git switch main && git pull
-   git tag trading-account/v$VERSION
-   git push origin trading-account/v$VERSION
-   ```
-3. Wait for the `contracts` run on the tag to finish. Its `release` job creates the GitHub Release. If it fails because the tag doesn't match `CONTRACT_VERSION`, delete the tag (`git push origin :refs/tags/trading-account/v$VERSION`), fix and tag again.
-4. Download the wasm, and check it against the hex hash in the Release notes:
-   ```bash
-   gh release download trading-account/v$VERSION -D contracts/target/near/trading_account --clobber
-   shasum -a 256 contracts/target/near/trading_account/trading_account.wasm
-   ```
-
-Use the Release's bs58 hash in the steps below.
-
-### Step 2: Rehearse on testnet
-
-1. Deploy the global contract. The bs58 hash it prints should match the Release's.
-   ```bash
-   near contract deploy-as-global use-file contracts/target/near/trading_account/trading_account.wasm as-global-hash peerfolio.testnet network-config testnet sign-with-keychain send
-   ```
-2. Point the factory at it:
-   ```bash
-   near contract call-function as-transaction auth.peerfolio.testnet set_global_code_hash json-args '{"code_hash_str":"<bs58 hash>"}' prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' sign-as peerfolio.peerfolio.testnet network-config testnet sign-with-keychain send
-   ```
-3. Verify:
-   1. `get_proxy_code_base58_hash` returns the new hash:
-      ```bash
-      near contract call-function as-read-only auth.peerfolio.testnet get_proxy_code_base58_hash json-args '{}' network-config testnet now
-      ```
-   2. Create a new trading account ([lifecycle](trading-account.md#lifecycle) step 1).
-   3. `near account view-account-summary $TA network-config testnet now` shows the new hash, in hex, under `Global Contract`.
-   4. Run through the rest of the [lifecycle](trading-account.md#lifecycle). `swap` needs 1Click and `intents.near`, which are mainnet only, so check it on the dev factory (step 4).
-   5. [Upgrade](trading-account.md#upgrading-a-trading-account) a trading account created before step 2, with agents added, and check it.
-
-   If the rehearsal finds a problem, delete the GitHub Release (`gh release delete trading-account/v$VERSION`) but keep the tag, so the number isn't reused. Fix it and release the next version.
-
-### Step 3: Deploy the global contract on mainnet
-
-```bash
-near contract deploy-as-global use-file contracts/target/near/trading_account/trading_account.wasm as-global-hash peerfolio.near network-config mainnet sign-with-keychain send
-```
-
-### Step 4: Point the dev factory at it
-
-Before the DAO proposal, point the [dev factory](factory.md#dev-factory) at the new global, signing as `dev.peerfolio.near`, and check it:
-
-```bash
-near contract call-function as-transaction auth.dev.peerfolio.near set_global_code_hash json-args '{"code_hash_str":"<bs58 hash>"}' prepaid-gas '30.0 Tgas' attached-deposit '0 NEAR' sign-as dev.peerfolio.near network-config mainnet sign-with-keychain send
-near contract call-function as-read-only auth.dev.peerfolio.near get_proxy_code_base58_hash json-args '{}' network-config mainnet now
-```
-
-Then rehearse in dev and release the app to prod, following Peerfolio Backend's contract release runbook. Skipping this step shows as a "not deployed yet" error on dev upgrades.
-
-If the dev rehearsal rejects the release, prod is untouched: release the next version, deploy its global and point the dev factory at it. If the release bumped `STATE_VERSION` to N and ran on any account, N's shape and migration are frozen, so a fix that changes them uses N+1. After a prod rollback, move the dev factory pointer back with prod's.
-
-### Step 5: Point the mainnet factory at it
-
-Only after the dev rehearsal passes and the app that handles the new version is on prod. Run a [DAO proposal](#dao-proposals) with:
-
-```bash
-export METHOD=set_global_code_hash
-export ARGS_JSON='{"code_hash_str":"<bs58 hash>"}'
-```
-
-### Step 6: Verify on mainnet
-
-```bash
-near contract call-function as-read-only auth.peerfolio.near get_proxy_code_base58_hash json-args '{}' network-config mainnet now
-```
-
-The next trading account created should show the new hex hash under `Global Contract` in `near account view-account-summary`. Existing accounts change only when their owners [upgrade](trading-account.md#upgrading-a-trading-account). Then update the hash in the [README](../README.md#deployments) and in [What's deployed now](#whats-deployed-now).
+New trading account code goes out as a new global contract, and the factories are then pointed at its hash: dev first, prod through the DAO once the dev rehearsal passes and the app that handles the new version is on prod. The factory code isn't redeployed. Follow the [runbook](runbooks/release-trading-account.md).
 
 ## Release factory code
 
-Use this for changes like bug fixes, gas tweaks and new view methods. A code-only redeploy keeps the factory's stored state. It only works if the new code reads the same stored fields, so if the `TradingAccountFactory` struct changed, [deploy a new factory](factory.md#deploy-a-new-factory) instead.
+A code-only redeploy keeps the factory's stored state, so it only works if the new code reads the same stored fields. Follow the [runbook](runbooks/release-factory.md).
 
-`auth.peerfolio.near` has no access keys, so on mainnet a council member adds a temporary key through the DAO, deploys with it, and then deletes it. On testnet, the `auth.peerfolio.testnet` key is in the keychain.
+`auth.peerfolio.near` has no access keys, so on mainnet the DAO adds the deploying council member's key, they deploy with it, and the script deletes it.
 
-> **TODO: deploy factory code without a temporary key.** For the length of a release, one council member alone holds a full-access key to the factory, outside the DAO's 3-of-4 approval, and nothing enforces that it's deleted afterwards. Instead, the factory could have an owner-only method that deploys the wasm passed to it onto its own account. Sputnik DAO already supports this: `store_blob` uploads the wasm to the DAO, and an `UpgradeRemote` proposal calls that method with it once approved. The factory would never need an access key. That's a factory code change, so it needs review, and the first release that adds the method still has to go out this way.
-
-### Step 1: Get the release build
-
-See [Get the release build](#get-the-release-build). Record the commit and the factory's hex hash.
-
-### Step 2: Rehearse on testnet
-
-1. Deploy without calling `new`:
-   ```bash
-   near contract deploy auth.peerfolio.testnet use-file contracts/target/near/trading_account_factory/trading_account_factory.wasm without-init-call network-config testnet sign-with-keychain send
-   ```
-2. Check the result:
-   - `near account view-account-summary auth.peerfolio.testnet network-config testnet now` shows the hex hash from step 1.
-   - These still return what they did before: `get_owner_id`, `get_signer_contract` and `get_proxy_code_base58_hash`.
-   ```bash
-   near contract call-function as-read-only auth.peerfolio.testnet get_owner_id json-args '{}' network-config testnet now
-   ```
-3. Create a trading account to check the new factory code works ([lifecycle](trading-account.md#lifecycle) step 1).
-
-### Step 3: Deploy to the dev factory
-
-Sign with the `auth.dev.peerfolio.near` key:
-
-```bash
-near contract deploy auth.dev.peerfolio.near use-file contracts/target/near/trading_account_factory/trading_account_factory.wasm without-init-call network-config mainnet sign-with-keychain send
-```
-
-Run the same checks as step 2.2 with `auth.dev.peerfolio.near` and `network-config mainnet`, then check a new dev login onboards.
-
-### Step 4: Add a temporary key to the mainnet factory
-
-1. Generate the key outside the repo:
-   ```bash
-   export KEY_DIR=$(mktemp -d)
-   near account create-account fund-later use-auto-generation save-to-folder $KEY_DIR
-   export KEY_FILE=$(ls $KEY_DIR/*.json)
-   export PUBKEY=$(jq -r .public_key $KEY_FILE)
-   ```
-2. Run a [DAO proposal](#dao-proposals) with:
-   ```bash
-   export METHOD=add_full_access_key
-   export ARGS_JSON="{\"public_key\":\"$PUBKEY\"}"
-   ```
-3. After the third approval, check the key is on the factory:
-   ```bash
-   near account list-keys auth.peerfolio.near network-config mainnet now
-   ```
-
-### Step 5: Deploy on mainnet
-
-```bash
-near contract deploy auth.peerfolio.near use-file contracts/target/near/trading_account_factory/trading_account_factory.wasm without-init-call network-config mainnet sign-with-access-key-file $KEY_FILE send
-```
-
-Then run the same checks as step 2.2 with `auth.peerfolio.near` and `network-config mainnet`, and update [What's deployed now](#whats-deployed-now).
-
-### Step 6: Delete the temporary key
-
-Don't skip this. The factory should have no access keys.
-
-```bash
-near account delete-keys auth.peerfolio.near public-keys $PUBKEY network-config mainnet sign-with-access-key-file $KEY_FILE send
-rm -rf $KEY_DIR
-near account list-keys auth.peerfolio.near network-config mainnet now
-```
+> **TODO: deploy factory code without a temporary key.** For the length of a release, one council member alone holds a full-access key to the factory, outside the DAO's 3-of-4 approval. Instead, the factory could have an owner-only method that deploys the wasm passed to it onto its own account. Sputnik DAO already supports this: `store_blob` uploads the wasm to the DAO, and an `UpgradeRemote` proposal calls that method with it once approved. The factory would never need an access key. That's a factory code change, so it needs review, and the first release that adds the method still has to go out this way.

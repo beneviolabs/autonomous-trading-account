@@ -19,11 +19,11 @@ agent ──swap(1Click quote)──▶ trading account ──mt_transfer──�
 | Dev factory | `auth.dev.peerfolio.near` | none |
 | Dev factory owner | `dev.peerfolio.near` (team key) | none |
 | Trading accounts | `implicit_<24hex>.auth.peerfolio.near`, or `implicit_<24hex>.auth.dev.peerfolio.near` from the dev factory | `implicit_<24hex>.auth.peerfolio.testnet` |
-| Trading account code (global hash) | `6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f` | same |
 | MPC signer, used only by trading accounts on v0 | `v1.signer` | `v1.signer-prod.testnet` |
 | Peerfolio agent, production | `bot.peerfolio.near` | none |
 | Peerfolio agent, staging and local dev | `bot.dev.peerfolio.near` | none |
 
+- `scripts/status.sh` shows what each factory runs and which trading account release it points at.
 - The previous mainnet factory, `auth-v1.peerfolio.near`, was replaced in January 2026.
 - The [dev factory](docs/factory.md#dev-factory) runs the same code as `auth.peerfolio.near` and points at the same globals. Peerfolio Backend's staging and local dev use it. Its pointer moves ahead of prod's, so a release is rehearsed there first.
 - No production trading account authorizes `bot.dev.peerfolio.near`, so its key can't reach them.
@@ -41,9 +41,10 @@ Some on-chain names still say "proxy" for the trading account: factory methods s
 
 - [Trading account](docs/trading-account.md): security model, lifecycle with commands, and deleting an account.
 - [Factory](docs/factory.md): account naming and deploying a new factory.
-- [Builds and releases](docs/releases.md): release builds, what's deployed, and releasing either contract (including DAO proposals).
+- [Builds and releases](docs/releases.md): release builds, versions, and how each kind of release works.
 - [Contract reference](docs/reference.md): methods, `swap` arguments and errors.
 - [Testing](docs/testing.md): local tests and CI.
+- Runbooks: [release trading account code](docs/runbooks/release-trading-account.md), [release factory code](docs/runbooks/release-factory.md), [deploy unreleased code to one account](docs/runbooks/dev-deploy.md), [smoke test a release](docs/runbooks/smoke-test.md).
 
 ## Development
 
@@ -52,9 +53,10 @@ Prerequisites:
 - cargo-near 0.22.0: `cargo install cargo-near --version 0.22.0 --locked`. The build scripts refuse other versions.
 - [near-cli-rs](https://github.com/near/near-cli-rs), tested with 0.22. Run `near login` for each account you'll sign as.
 - Docker, only to reproduce a release build locally. Releases normally use CI's build.
+- For the release and dev scripts: `gh` (signed in), `jq`, `curl` and `python3`. `shellcheck` to lint them.
 
 ```bash
-scripts/test.sh   # unit and integration tests
+make test         # unit and integration tests
 make release      # reproducible release build (CI runs it too)
 make help         # all targets
 ```
