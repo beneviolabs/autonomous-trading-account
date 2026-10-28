@@ -1,4 +1,4 @@
-.PHONY: release build fmt-check clippy test-unit test audit help
+.PHONY: release build fmt-check clippy shellcheck test-unit test-integration test audit help
 
 # Packages are checked one at a time: the two contracts enable different near-sdk features,
 # and a --workspace invocation would unify them.
@@ -24,12 +24,20 @@ fmt-check:
 clippy:
 	cd contracts && for p in $(PACKAGES); do cargo clippy -p $$p --all-targets -- -D warnings || exit 1; done
 
+shellcheck:
+	shellcheck scripts/*.sh scripts/release/*.sh scripts/dev/*.sh
+
 test-unit:
 	cd contracts && for p in $(PACKAGES); do cargo test -p $$p --lib || exit 1; done
 
-# Unit + sandbox integration tests.
-test:
-	./scripts/test.sh
+# The sandbox tests embed the trading account wasm at compile time, so it's rebuilt first. That
+# build also trusts the key the tests sign quotes with (seed "1click", as in the unit tests), so
+# never deploy it; scripts/dev/flash-dev.sh refuses to.
+test-integration:
+	ONE_CLICK_TEST_KEY="ed25519:4xzHWfzwdwnkGbsL3G1C7UBt1v9DX2ZnnE8zmatq3Lba" ./scripts/build-wasm.sh contracts/trading-account
+	cd contracts && cargo test -p trading-account --features integration-tests --lib integration_tests
+
+test: test-unit test-integration
 
 # Ignores (with reasons) are in contracts/.cargo/audit.toml.
 audit:
@@ -41,6 +49,8 @@ help:
 	@echo "  build      - Fast native dev build of both contracts (not for deployment)"
 	@echo "  fmt-check  - Check formatting"
 	@echo "  clippy     - Run clippy lints"
+	@echo "  shellcheck - Lint the scripts"
 	@echo "  test-unit  - Unit tests for both contracts"
+	@echo "  test-integration - Rebuild the trading account and run its sandbox tests"
 	@echo "  test       - Unit + integration tests"
 	@echo "  audit      - cargo audit of the workspace lockfile"

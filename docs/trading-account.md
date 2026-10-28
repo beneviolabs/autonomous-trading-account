@@ -2,12 +2,7 @@
 
 The per-user contract, created by the [factory](factory.md) at `implicit_<24hex>.auth.peerfolio.near`, or `implicit_<24hex>.auth.dev.peerfolio.near` from the [dev factory](factory.md#dev-factory). The owner moves in only the funds an agent may trade with. Agents can then swap them on `intents.near` with 1Click quotes that pay out only to the user. Method details are in the [reference](reference.md#trading-account).
 
-## Glossary
-
-- **Owner**: the user's NEAR account that controls the trading account.
-- **Agent**: an account the owner allows to call `swap`, usually Peerfolio's bot: `bot.peerfolio.near` in production, `bot.dev.peerfolio.near` in staging and local dev. A trading account can have at most 10.
-- **1Click quote**: a swap quote from NEAR Intents' 1Click API, signed with 1Click's key. A live quote has a `depositAddress`; depositing `amountIn` of `originAsset` there starts the swap.
-- **Trading account**: this contract.
+Terms (owner, agent, 1Click quote, MPC key) are defined in the [README](../README.md#terms).
 
 ## Security model
 
@@ -29,7 +24,7 @@ The per-user contract, created by the [factory](factory.md) at `implicit_<24hex>
 - **Keys registered on `intents.near` bypass the contract.** Any public key registered for the trading account on `intents.near` can sign intents that move its balance anywhere. `delete_key` doesn't unregister a key; that takes `intents.near`'s `remove_public_key`, called by the account.
 - **Only upgraded accounts get these checks.** Trading accounts on v0 have no `swap`, and sign any call on v0's wider allowlist, including `ft_withdraw` and `mt_transfer` to any receiver.
 - **To cut off an agent**, remove it with `remove_agent`. It takes effect at once.
-- The checks are compiled in. Changing them means [releasing new trading account code](releases.md#release-trading-account-code), and existing trading accounts keep their old code until their owner [upgrades them](#upgrading-a-trading-account).
+- The checks are compiled in. Changing them means [releasing new trading account code](runbooks/release-trading-account.md), and existing trading accounts keep their old code until their owner [upgrades them](#upgrading-a-trading-account).
 
 ## Lifecycle
 
@@ -91,13 +86,13 @@ From before the implicit-owner naming and 1.0.0:
 
 The owner adds the new agent with `add_agent` and removes the old one with `remove_agent`, in either order; both can go in one transaction to the trading account.
 
-The trading account code deployed now (see the [README](../README.md#deployments)) predates 1.0.0 until its owner [upgrades it](#upgrading-a-trading-account): it uses `add_authorized_user` and `remove_authorized_user`, signs through the MPC key, and can't delete that key. Removing the old agent still stops it requesting new signatures, but what it already had signed stays valid until it expires, about 24 hours later.
+A trading account predates 1.0.0 until its owner [upgrades it](#upgrading-a-trading-account): it uses `add_authorized_user` and `remove_authorized_user`, signs through the MPC key, and can't delete that key. Removing the old agent still stops it requesting new signatures, but what it already had signed stays valid until it expires, about 24 hours later. To see which an account runs, call its `contract_version`: v0 has none.
 
 ## Upgrading a trading account
 
-A [release](releases.md#release-trading-account-code) changes only the code of trading accounts created afterwards. An existing account keeps its code until its owner upgrades it to the code the factory points at. The upgrade switches the code and runs `migrate` in one receipt, so if `migrate` fails the account keeps its old code and state. The agents and the owner carry over. Upgrading from v0 drops the MPC signer from the state; the MPC key stays on the account.
+A [release](runbooks/release-trading-account.md) changes only the code of trading accounts created afterwards. An existing account keeps its code until its owner upgrades it to the code the factory points at. The upgrade switches the code and runs `migrate` in one receipt, so if `migrate` fails the account keeps its old code and state. The agents and the owner carry over. Upgrading from v0 drops the MPC signer from the state; the MPC key stays on the account.
 
-Get the hash the account's own factory (its parent) points at, and check it matches the hash in the version's [GitHub Release](releases.md#versions):
+Get the hash the account's own factory (its parent) points at, and check it matches the hash in the version's [GitHub Release](releasing.md#versions):
 ```bash
 near contract call-function as-read-only auth.peerfolio.testnet get_proxy_code_base58_hash json-args '{}' network-config testnet now
 ```

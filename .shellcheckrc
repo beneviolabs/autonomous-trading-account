@@ -1,0 +1,4 @@
+source-path=SCRIPTDIR
+external-sources=true
+# The sed patterns match literal backticks in release notes.
+disable=SC2016

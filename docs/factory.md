@@ -20,28 +20,8 @@ These rules came from a security review. Named owners used to be mapped by strip
 
 Its owner is `dev.peerfolio.near`, a team account, so its pointer moves without a DAO vote. That lets every release be rehearsed in dev (new accounts, upgrades, the blocking gate) before the DAO moves prod's pointer. The keys for `dev.peerfolio.near` and `auth.dev.peerfolio.near` are in the team password manager; import them into your keychain to sign.
 
-Both kinds of release change it, as a step before prod: [Release trading account code](releases.md#step-4-point-the-dev-factory-at-it) moves its pointer, and [Release factory code](releases.md#step-3-deploy-to-the-dev-factory) redeploys its code.
+Both kinds of release change it, as a step before prod: [releasing trading account code](runbooks/release-trading-account.md) moves its pointer, and [releasing factory code](runbooks/release-factory.md) redeploys its code.
 
 ## Deploy a new factory
 
-Use this only for a new factory account, for example when the factory's stored state changes. [`contracts/factory/deploy.sh`](../contracts/factory/deploy.sh) does it in one go:
-
-1. It creates `auth.peerfolio.<near|testnet>` from `peerfolio.<near|testnet>` with 4 NEAR.
-2. It deploys the release factory wasm from `contracts/target/near` and calls `new` with the owner, the network and the trading account code hash.
-3. It checks the deployed code hash matches the local wasm.
-
-[Get the release build](releases.md#get-the-release-build) first, then:
-
-```bash
-contracts/factory/deploy.sh peerfolio.sputnik-dao.near 6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f mainnet
-```
-
-That's how the live mainnet factory was deployed. Run it with `peerfolio.peerfolio.testnet` and `testnet` first.
-
-- The factory ID defaults to `auth.peerfolio.<suffix>`, created from `peerfolio.<suffix>`. Set `FACTORY_ACCOUNT` and `ROOT_ACCOUNT` to use others, and keep the ID at most 30 characters.
-- `ROOT_ACCOUNT`'s key (by default `peerfolio.<near|testnet>`'s) has to be in your keychain. If that account uses a Ledger, temporarily add a keychain full-access key, run the script, then delete the key.
-- The script uses near-cli-rs's legacy-compatible commands (`near deploy`, `near state`). In that syntax, `--deposit 1` means 1 NEAR, not 1 yoctoNEAR.
-- If the factory account already exists, the script only redeploys the code and ignores the owner and hash arguments. That doesn't work on mainnet, where the factory has no keys; use [Release factory code](releases.md#release-factory-code) instead.
-- The previous factory, `auth-v1.peerfolio.near`, was replaced in January 2026.
-
-Afterwards, point the app at the new factory: `AUTH_CREATOR` / `VITE_AUTH_CREATOR_*` in Peerfolio Backend (local `.env`, Render and Cloudflare).
+A new factory account is needed when the factory's stored state changes. Follow the [runbook](runbooks/new-factory.md). Code-only changes are [redeployed](runbooks/release-factory.md) onto the existing factories instead.
