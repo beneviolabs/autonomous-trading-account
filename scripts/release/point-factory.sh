@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Points the dev or testnet factory at a trading account release.
 #
-# Usage: scripts/release/point-factory.sh <dev|testnet> <version> [--rollback] [--dry-run]
+# Usage: scripts/release/point-factory.sh <dev|testnet> <version|v0> [--rollback] [--dry-run]
 #
 # Calls set_global_code_hash as the factory owner, from the keychain, and reads the pointer back.
 # Refuses to move to an older version unless --rollback is given. The prod factory moves only
@@ -23,7 +23,11 @@ target="${args[0]}" version="${args[1]}"
 case "$target" in dev|testnet) ;; *) usage ;; esac
 factory_target "$target"
 
-fetch_release "$version"
+if [ "$version" = v0 ]; then
+    RELEASE_BS58="$V0_HASH"
+else
+    fetch_release "$version"
+fi
 global_exists "$NETWORK" "$RELEASE_BS58" \
     || die "$version isn't a global contract on $NETWORK yet: scripts/release/deploy-global.sh $NETWORK $version"
 

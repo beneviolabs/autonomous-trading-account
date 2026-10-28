@@ -9,13 +9,13 @@ The script prints each transaction and asks before sending it. Add `--dry-run` t
 - [ ] The factory change is merged to `main` (on mainnet), and the `contracts` run for that commit passed.
 - [ ] The trading account version the factory will point at is a global contract on that network, or is `v0`.
 - [ ] The new factory ID is at most 30 characters, so trading account IDs fit NEAR's 64.
-- [ ] The parent account's key is in your keychain: `peerfolio.near` for `auth.peerfolio.near`, `dev.peerfolio.near` for `auth.dev.peerfolio.near`, `peerfolio.testnet` for `auth.peerfolio.testnet`. If the parent uses a Ledger, temporarily add a keychain full-access key to it, and delete it afterwards.
+- [ ] The parent account's key is in your keychain: `peerfolio.near` for `<new factory>.peerfolio.near`, `dev.peerfolio.near` for `<new factory>.dev.peerfolio.near`, `peerfolio.testnet` for `<new factory>.peerfolio.testnet`. The script refuses an existing factory such as `auth.peerfolio.near`. If the parent uses a Ledger, temporarily add a keychain full-access key to it, and delete it afterwards.
 
 ## Steps
 
 1. *Optional:* **rehearse on testnet.**
    ```bash
-   scripts/release/new-factory.sh testnet auth.peerfolio.testnet peerfolio.peerfolio.testnet <version> <commit>
+   scripts/release/new-factory.sh testnet <new factory>.peerfolio.testnet peerfolio.peerfolio.testnet <version> <commit>
    ```
 
 2. **Create it.** The script:
@@ -24,8 +24,8 @@ The script prints each transaction and asks before sending it. Add `--dry-run` t
    3. checks the code hash, owner and pointer,
    4. offers to delete the key it created. A factory owned by the DAO should have no keys; decline for a dev or testnet factory, which keeps its key.
    ```bash
-   scripts/release/new-factory.sh mainnet auth.peerfolio.near peerfolio.sputnik-dao.near <version> <commit>      # prod
-   scripts/release/new-factory.sh mainnet auth.dev.peerfolio.near dev.peerfolio.near <version> <commit>          # dev
+   scripts/release/new-factory.sh mainnet <new factory>.peerfolio.near peerfolio.sputnik-dao.near <version> <commit>      # prod
+   scripts/release/new-factory.sh mainnet <new factory>.dev.peerfolio.near dev.peerfolio.near <version> <commit>          # dev
    ```
    If it stops after creating the account, run it again: it carries on from the deploy.
 

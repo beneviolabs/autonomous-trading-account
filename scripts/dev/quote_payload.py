@@ -7,7 +7,7 @@ JSON.stringify drops undefined. swap takes this string byte for byte.
 import json, sys
 r = json.load(sys.stdin)
 req, q = r["quoteRequest"], r["quote"]
-fields = lambda src, keys: {k: src.get(k) for k in keys}
+fields = lambda src, keys: {k: src[k] for k in keys if k in src}
 signed = fields(req, ["dry", "swapType", "slippageTolerance", "originAsset", "depositType", "destinationAsset",
     "amount", "refundTo", "refundType", "recipient", "recipientType", "deadline"])
 signed |= fields(q, ["amountIn", "amountInFormatted", "amountInUsd", "minAmountIn", "amountOut",

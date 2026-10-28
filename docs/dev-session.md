@@ -24,7 +24,7 @@ scripts/dev/session.sh <trading account>        # add testnet for a testnet acco
 ## What restore does
 
 `scripts/dev/restore.sh <snapshot>` sends one transaction, signed as the trading account:
-1. It deploys the restore helper, [`scripts/dev/restore-state`](../scripts/dev/restore-state),, and calls its `restore`, which writes back every storage entry from the snapshot and removes the ones written since.
+1. It deploys the restore helper, [`scripts/dev/restore-state`](../scripts/dev/restore-state), and calls its `restore`, which writes back every storage entry from the snapshot and removes the ones written since.
 2. It puts back the snapshot's code: its global contract, or the wasm the snapshot saved.
 
 The actions share a receipt, so if any fails nothing changes, and the helper never stays on the account. Afterwards the script checks that storage and code match the snapshot. It reports keys and NEAR that differ, since those aren't contract state; send back any top-up yourself.

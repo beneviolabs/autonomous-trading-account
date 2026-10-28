@@ -72,6 +72,7 @@ if [ "$target" = prod ]; then
     info "deleting the temporary key $temp_key. The factory should have no keys."
     run_tx near account delete-keys "$FACTORY" public-keys "$temp_key" \
         network-config mainnet "${SIGN[@]}" send
+    [ "$DRY_RUN" = 1 ] && exit 0
     [ -z "$(access_keys mainnet "$FACTORY")" ] || die "$FACTORY still has keys. Delete them before you finish."
     info "done: $FACTORY has no keys"
 fi

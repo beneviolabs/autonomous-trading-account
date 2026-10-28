@@ -248,7 +248,7 @@ fetch_ci_factory() {
         || die "couldn't download run $run's wasm; artifacts expire after 90 days"
     FACTORY_WASM="$dir/trading_account_factory/trading_account_factory.wasm"
     hex="$(sha256_hex "$FACTORY_WASM")"
-    gh run view "$run" --repo "$GH_REPO" --log | grep -q "SHA-256 checksum hex : $hex" \
+    gh run view "$run" --repo "$GH_REPO" --log | grep -F "SHA-256 checksum hex : $hex" >/dev/null \
         || die "run $run's log doesn't show the hash of the wasm it uploaded"
     FACTORY_BS58="$(hex_to_bs58 "$hex")"
     info "factory at ${commit:0:7} (run $run): $FACTORY_BS58 (checked)"

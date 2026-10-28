@@ -95,7 +95,7 @@ make test-integration   # rebuilds the trading account, then runs the sandbox te
 make shellcheck         # lints scripts/
 ```
 
-The integration tests embed `contracts/target/near/trading_account/trading_account.wasm` (a dev build) at compile time and only compile with `--features integration-tests`. Run them through `make test-integration`, which rebuilds the wasm first; a bare `cargo test` runs them against whatever wasm was built last. To pass test filters or `--nocapture`, run the `cargo test` line from the `Makefile` after it.
+The integration tests embed `contracts/target/near/trading_account/trading_account.wasm` (a dev build) at compile time and only compile with `--features integration-tests`. Run them through `make test-integration`, which rebuilds the wasm first; `cargo test --features integration-tests` on its own runs them against whatever wasm was built last. A bare `cargo test` doesn't run them at all. To pass test filters or `--nocapture`, run the `cargo test` line from the `Makefile` after it.
 
 Test one package per command (`make test-unit` does). The contracts enable different near-sdk features, and `--workspace` would unify them.
 

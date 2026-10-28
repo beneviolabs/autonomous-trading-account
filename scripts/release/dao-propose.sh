@@ -35,12 +35,16 @@ case "${args[0]}" in
             || die "${args[1]} isn't a global contract on mainnet yet: scripts/release/deploy-global.sh mainnet ${args[1]}"
         method=set_global_code_hash
         method_args="{\"code_hash_str\":\"$RELEASE_BS58\"}"
-        commit="$(gh release view "trading-account/v${args[1]}" --repo "$GH_REPO" --json targetCommitish --jq .targetCommitish)"
+        # CI writes the tagged commit into the notes; the Release's target is only the branch.
+        commit="$(gh release view "trading-account/v${args[1]}" --repo "$GH_REPO" --json body --jq .body \
+            | sed -nE 's/^Built reproducibly from ([0-9a-f]{40}) .*/\1/p')"
+        [ -n "$commit" ] || die "trading-account/v${args[1]}'s notes don't say which commit built it"
         description="Point $PROD_FACTORY at trading account ${args[1]}: global code $RELEASE_BS58, released at https://github.com/$GH_REPO/releases/tag/trading-account/v${args[1]} (built from $commit)."
         ;;
     add-key)
         method=add_full_access_key
-        method_args="{\"public_key\":\"${args[1]}\"}"
+        [[ "${args[1]}" =~ ^ed25519:[1-9A-HJ-NP-Za-km-z]{43,44}$ ]] || die "${args[1]} isn't an ed25519 public key"
+        method_args="$(jq -cn --arg k "${args[1]}" '{public_key: $k}')"
         description="Add a temporary full-access key ${args[1]} to $PROD_FACTORY, to deploy new factory code. It's deleted after the deploy."
         ;;
     *) usage ;;
