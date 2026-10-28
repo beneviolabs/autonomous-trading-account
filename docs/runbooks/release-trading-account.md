@@ -68,4 +68,4 @@ export VERSION=<new CONTRACT_VERSION>
   scripts/release/point-factory.sh dev <previous version> --rollback
   ```
 - **Move prod back:** propose the previous version (`dao-propose.sh pointer <previous version> …`), and move dev back with it.
-- **If the release bumped `STATE_VERSION` to N and ran on any account,** N's shape and migration are frozen. A fix that changes them uses N+1.
+- **Accounts that already upgraded** can't be moved back, only forward. Moving the pointer back is safe only if the previous release has the same `STATE_VERSION`. A broken migration is fixed in the next release; a fix that needs a different state shape is a new state version ([rollbacks](../development.md#rollbacks)).

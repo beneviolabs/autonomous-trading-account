@@ -22,8 +22,8 @@ To see what each factory runs and points at now, run `scripts/status.sh` (or `sc
 ## Versions
 
 The trading account reports its version from `contract_version()`. The numbers are two constants at the top of `contracts/trading-account/src/lib.rs`:
-- `CONTRACT_VERSION`: bumped once per release. The Peerfolio Backend trading-account upgrades RFC says whether it's a patch, minor or major bump.
-- `STATE_VERSION`: bumped only in the PR that changes the shape of the stored state. A unit test fails if the state changes without it.
+- `CONTRACT_VERSION`: bumped once per release, as a patch, minor or major ([which version to bump](development.md#which-version-to-bump)).
+- `STATE_VERSION`: bumped only in the PR that changes the shape of the stored state ([what needs a new state version](development.md#what-needs-a-new-state-version)). A unit test fails if the state changes without it.
 
 **A release is a git tag**, `trading-account/v<CONTRACT_VERSION>`. Pushing the tag is what releases. CI then:
 1. runs the tests and the reproducible build of the tagged commit,
