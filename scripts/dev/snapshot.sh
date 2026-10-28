@@ -11,7 +11,7 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/../lib.sh"
 
 [[ $# -ge 1 && $# -le 2 ]] || usage
 account="$1" network="${2:-mainnet}"
-global_deployer "$network" >/dev/null
+check_network "$network"
 
 view="$(view_account "$network" "$account")" || die "$account doesn't exist on $network"
 storage="$(view_state "$network" "$account")"

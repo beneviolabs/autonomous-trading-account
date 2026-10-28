@@ -4,8 +4,8 @@
 # Usage: scripts/release/deploy-global.sh <mainnet|testnet> <version> [--dry-run]
 #
 # Downloads the version's GitHub Release and checks its hash, then deploys it with
-# deploy-as-global, signed from the keychain as peerfolio.near (or peerfolio.testnet). On mainnet
-# that costs about 40 NEAR for storage. Does nothing if the global already exists.
+# deploy-as-global, signed from the keychain as dev.peerfolio.near (or peerfolio.peerfolio.testnet),
+# which pays for the storage: about 40 NEAR on mainnet. Does nothing if the global already exists.
 # shellcheck source=../lib.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../lib.sh"
 

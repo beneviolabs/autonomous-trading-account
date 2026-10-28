@@ -21,7 +21,7 @@ for arg in "$@"; do
 done
 [[ "${#args[@]}" -ge 1 && "${#args[@]}" -le 2 ]] || usage
 account="${args[0]}" network="${args[1]:-mainnet}"
-global_deployer "$network" >/dev/null
+check_network "$network"
 
 # Owner and agents, read before and after.
 read_state() {

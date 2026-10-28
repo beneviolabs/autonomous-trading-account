@@ -26,7 +26,7 @@ for arg in "$@"; do
 done
 [ "${#args[@]}" = 5 ] || usage
 network="${args[0]}" factory="${args[1]}" owner="${args[2]}" version="${args[3]}" commit="${args[4]}"
-global_deployer "$network" >/dev/null
+check_network "$network"
 root="${factory#*.}"
 [ "$root" != "$factory" ] || die "$factory has no parent account to create it"
 [ "${#factory}" -le 30 ] || die "$factory is over 30 characters, so trading account IDs wouldn't fit NEAR's 64"

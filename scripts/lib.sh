@@ -42,12 +42,21 @@ factory_target() {
     esac
 }
 
-# The account that pays for and deploys global contracts on a network.
-global_deployer() {
+check_network() {
     case "$1" in
-        mainnet) echo peerfolio.near ;;
-        testnet) echo peerfolio.testnet ;;
+        mainnet|testnet) ;;
         *) die "unknown network '$1': expected mainnet or testnet" ;;
+    esac
+}
+
+# The account that pays for global contracts on a network. Publishing by hash leaves the code
+# owned by nobody, so the deployer only pays the storage; these team accounts are already in the
+# keychain for releases, which keeps peerfolio.near's key out of it.
+global_deployer() {
+    check_network "$1"
+    case "$1" in
+        mainnet) echo dev.peerfolio.near ;;
+        testnet) echo peerfolio.peerfolio.testnet ;;
     esac
 }
 

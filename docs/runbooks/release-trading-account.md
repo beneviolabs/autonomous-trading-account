@@ -7,8 +7,7 @@ Every script prints the transaction and asks before sending it. Add `--dry-run` 
 ## Before you start
 
 - [ ] A PR that bumps `CONTRACT_VERSION` is merged to `main` ([Versions](../releasing.md#versions)).
-- [ ] `peerfolio.near` is in your keychain, with about 40 NEAR for the global contract's storage. Arrange funding or reimbursement first.
-- [ ] `dev.peerfolio.near` is in your keychain (team password manager).
+- [ ] `dev.peerfolio.near` is in your keychain (team password manager), with about 40 NEAR for the global contract's storage. It pays for the global and moves the dev factory's pointer. Arrange funding first.
 - [ ] A council member can propose with their Ledger, and Peerfolio Backend has a release that handles the new version.
 - [ ] `scripts/status.sh` exits 0.
 
@@ -30,7 +29,7 @@ export VERSION=<new CONTRACT_VERSION>
    ```
    If CI fails because the tag doesn't match `CONTRACT_VERSION` or isn't on `main`, delete the tag (`git push origin :refs/tags/trading-account/v$VERSION`), fix it and tag again.
 
-2. *Optional:* **rehearse on testnet.** Needs `peerfolio.testnet` and `peerfolio.peerfolio.testnet` in your keychain. Then create an account and run through the [lifecycle](../trading-account.md#lifecycle).
+2. *Optional:* **rehearse on testnet.** Needs `peerfolio.peerfolio.testnet` in your keychain, which pays for the testnet global and owns the testnet factory. Then create an account and run through the [lifecycle](../trading-account.md#lifecycle).
    ```bash
    scripts/release/deploy-global.sh testnet $VERSION
    scripts/release/point-factory.sh testnet $VERSION
