@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Fast, native DEV build of one contract crate's wasm (used by `make build`,
-# `make test-integration` and scripts/flash-dev.sh).
+# `make test-integration` and scripts/dev/flash-dev.sh).
 #
 # Usage: scripts/build-wasm.sh <crate dir>
 # Output: contracts/target/near/<lib name>/<lib name>.wasm, even if CARGO_TARGET_DIR is set,
-# because the integration tests (include_bytes!) and scripts/flash-dev.sh read it from there.
+# because the integration tests (include_bytes!) and scripts/dev/flash-dev.sh read it from there.
 #
 # Do NOT deploy what this produces. Its hash depends on the host (OS/CPU/toolchain), so it
 # can't be verified by anyone else. Release builds are reproducible and run in NEAR's pinned

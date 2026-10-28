@@ -56,6 +56,7 @@ global_deployer() {
 DRY_RUN=0
 
 # Prints a command, asks before running it, and runs it. With --dry-run it only prints.
+# Declining returns 1, which ends a script (set -e) but lets the dev session carry on.
 run_tx() {
     echo >&2
     printf '  %q' "$@" >&2
@@ -67,7 +68,10 @@ run_tx() {
     fi
     local answer
     read -r -p "Send? [y/N] " answer
-    [ "$answer" = y ] || [ "$answer" = Y ] || die "not sent"
+    if [ "$answer" != y ] && [ "$answer" != Y ]; then
+        echo "not sent" >&2
+        return 1
+    fi
     "$@"
 }
 
@@ -114,6 +118,12 @@ access_keys() {
         | jq -r '.keys[].public_key'
 }
 
+# view_state <network> <account>: the contract's storage, [{key, value}] base64, sorted by key.
+view_state() {
+    rpc_query "$1" "{\"request_type\":\"view_state\",\"finality\":\"final\",\"account_id\":\"$2\",\"prefix_base64\":\"\"}" \
+        | jq -c '[.values[] | {key, value}] | sort_by(.key)'
+}
+
 # global_exists <network> <bs58 hash>
 global_exists() {
     rpc_query "$1" "{\"request_type\":\"view_global_contract_code\",\"finality\":\"final\",\"code_hash\":\"$2\"}" \
@@ -147,14 +157,14 @@ print("1" * (len(digest) - len(digest.lstrip(b"\0"))) + out)
 
 # --- Releases -------------------------------------------------------------------------------
 
-# A temporary folder for downloads, deleted when the script exits.
+# Sets WORK_DIR to a temporary folder for downloads, deleted when the script exits. Call it
+# directly, not in $(...), or the folder is deleted as soon as the subshell ends.
 WORK_DIR=""
 work_dir() {
     if [ -z "$WORK_DIR" ]; then
         WORK_DIR="$(mktemp -d)"
         trap 'rm -rf "$WORK_DIR"' EXIT
     fi
-    echo "$WORK_DIR"
 }
 
 # Every trading account release, one "<version> <bs58 hash>" per line, oldest first, read from
@@ -181,7 +191,8 @@ version_of_hash() {
 # Sets RELEASE_WASM and RELEASE_BS58.
 fetch_release() {
     local tag="trading-account/v$1" dir notes hex
-    dir="$(work_dir)/release-$1"
+    work_dir
+    dir="$WORK_DIR/release-$1"
     notes="$(gh release view "$tag" --repo "$GH_REPO" --json body --jq .body)" \
         || die "no GitHub Release $tag"
     hex="$(sed -nE 's/^SHA-256 \(hex\): `([^`]+)`.*/\1/p' <<<"$notes")"
@@ -209,7 +220,8 @@ fetch_ci_factory() {
         --json databaseId,event,conclusion \
         --jq '[.[] | select(.conclusion == "success" and (.event == "push" or .event == "workflow_dispatch"))][0].databaseId')"
     [ -n "$run" ] && [ "$run" != null ] || die "no successful push or manual CI run for $commit. Start one: gh workflow run contracts.yml --ref <branch>"
-    dir="$(work_dir)/ci-$commit"
+    work_dir
+    dir="$WORK_DIR/ci-$commit"
     gh run download "$run" --repo "$GH_REPO" -n contract-wasm -D "$dir" \
         || die "couldn't download run $run's wasm; artifacts expire after 90 days"
     FACTORY_WASM="$dir/trading_account_factory/trading_account_factory.wasm"

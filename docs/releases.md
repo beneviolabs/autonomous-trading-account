@@ -7,7 +7,7 @@ How both contracts are built, and how new code reaches testnet and mainnet. Acco
 | | How | Deploy it? |
 |---|---|---|
 | Release | Trading account: its [GitHub Release](#versions). Factory: the `contract-wasm` artifact from CI. Or `make release` locally. | Yes. Only deploy these. The release scripts download and check them. |
-| Dev | `make build` | No, except onto one account with [`scripts/flash-dev.sh`](runbooks/dev-deploy.md). |
+| Dev | `make build` | No, except onto one account for a [dev session](runbooks/dev-deploy.md). |
 
 Both write to `contracts/target/near/<crate>/<crate>.wasm`:
 - trading account: `contracts/target/near/trading_account/trading_account.wasm`

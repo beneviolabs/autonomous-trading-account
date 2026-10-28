@@ -44,7 +44,7 @@ Some on-chain names still say "proxy" for the trading account: factory methods s
 - [Builds and releases](docs/releases.md): release builds, versions, and how each kind of release works.
 - [Contract reference](docs/reference.md): methods, `swap` arguments and errors.
 - [Testing](docs/testing.md): local tests and CI.
-- Runbooks: [release trading account code](docs/runbooks/release-trading-account.md), [release factory code](docs/runbooks/release-factory.md), [deploy unreleased code to one account](docs/runbooks/dev-deploy.md), [smoke test a release](docs/runbooks/smoke-test.md).
+- Runbooks: [release trading account code](docs/runbooks/release-trading-account.md), [release factory code](docs/runbooks/release-factory.md), [try unreleased code on one account](docs/runbooks/dev-deploy.md), [smoke test a release](docs/runbooks/smoke-test.md).
 
 ## Development
 

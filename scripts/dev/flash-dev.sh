@@ -3,13 +3,13 @@
 # unreleased code. It replaces whatever code the account ran, and the account then runs code no
 # release has, so use it only on accounts you mean to.
 #
-# Usage: scripts/flash-dev.sh <trading account> [mainnet|testnet] [--dry-run]
+# Usage: scripts/dev/flash-dev.sh <trading account> [mainnet|testnet] [--dry-run]
 #
 # Builds the trading account without ONE_CLICK_TEST_KEY and refuses if the wasm still trusts the
 # test key. Deploys it with migrate, signed from the keychain as the trading account (its key
 # must be there), then checks the code hash, version, owner and agents.
-# shellcheck source=lib.sh
-source "$(dirname -- "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=../lib.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/../lib.sh"
 
 args=()
 for arg in "$@"; do
@@ -33,7 +33,10 @@ read_state() {
 }
 before="$(read_state)" || die "couldn't read $account's owner and agents on $network"
 
-env -u ONE_CLICK_TEST_KEY "$REPO_ROOT/scripts/build-wasm.sh" "$REPO_ROOT/contracts/trading-account" >/dev/null
+build_log="$(mktemp)"
+env -u ONE_CLICK_TEST_KEY "$REPO_ROOT/scripts/build-wasm.sh" "$REPO_ROOT/contracts/trading-account" >"$build_log" 2>&1 \
+    || { tail -20 "$build_log" >&2; die "build failed"; }
+rm -f "$build_log"
 wasm="$REPO_ROOT/contracts/target/near/trading_account/trading_account.wasm"
 if LC_ALL=C grep -aqF "$ONE_CLICK_TEST_PUBLIC_KEY" "$wasm"; then
     die "$wasm trusts the sandbox tests' quote key. Not deploying it."

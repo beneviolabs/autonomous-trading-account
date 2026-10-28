@@ -25,15 +25,17 @@ clippy:
 	cd contracts && for p in $(PACKAGES); do cargo clippy -p $$p --all-targets -- -D warnings || exit 1; done
 
 shellcheck:
-	shellcheck scripts/*.sh scripts/release/*.sh
+	shellcheck scripts/*.sh scripts/release/*.sh scripts/dev/*.sh
 
 test-unit:
 	cd contracts && for p in $(PACKAGES); do cargo test -p $$p --lib || exit 1; done
 
 # The sandbox tests embed the trading account wasm at compile time, so it's rebuilt first. That
 # build also trusts the key the tests sign quotes with (seed "1click", as in the unit tests), so
-# never deploy it; scripts/flash-dev.sh refuses to.
+# never deploy it; scripts/dev/flash-dev.sh refuses to.
 test-integration:
+	# The restore rehearsal deploys the dev restore helper.
+	cd tools/restore-state && cargo near build non-reproducible-wasm --no-abi
 	ONE_CLICK_TEST_KEY="ed25519:4xzHWfzwdwnkGbsL3G1C7UBt1v9DX2ZnnE8zmatq3Lba" ./scripts/build-wasm.sh contracts/trading-account
 	cd contracts && cargo test -p trading-account --features integration-tests --lib integration_tests
 

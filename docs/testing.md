@@ -5,7 +5,7 @@
 ```bash
 make test               # all of the below
 make test-unit          # unit tests, one crate at a time
-make test-integration   # rebuilds the trading account, then runs its sandbox tests
+make test-integration   # rebuilds the trading account and the restore helper, then runs the sandbox tests
 make shellcheck         # lints scripts/
 ```
 
@@ -22,7 +22,7 @@ Where `swap` is tested:
 - `integration_tests.rs`: `swap`'s cross-contract call in the sandbox (`test_swap_*`), against a stub `intents.near`.
 - Only a mainnet run checks the real `intents.near` and 1Click: the [smoke test](runbooks/smoke-test.md).
 
-**The sandbox build trusts a test key.** `make test-integration` builds the wasm with `ONE_CLICK_TEST_KEY` set, so the contract also accepts quotes signed with the tests' key and the sandbox tests can sign their own. Don't set it for any other build. `scripts/flash-dev.sh` builds without it and refuses a wasm that contains the key. Release builds pass no environment into their container, so they trust 1Click's key alone.
+**The sandbox build trusts a test key.** `make test-integration` builds the wasm with `ONE_CLICK_TEST_KEY` set, so the contract also accepts quotes signed with the tests' key and the sandbox tests can sign their own. Don't set it for any other build. `scripts/dev/flash-dev.sh` builds without it and refuses a wasm that contains the key. Release builds pass no environment into their container, so they trust 1Click's key alone.
 
 Gotchas:
 - **The first integration test run downloads the sandbox.** `near-workspaces` fetches neard 2.13.4 (the version mainnet runs) the first time the tests start a sandbox, and caches it. To run offline, or with a binary you already have, set `NEAR_SANDBOX_BIN_PATH=/path/to/near-sandbox`.

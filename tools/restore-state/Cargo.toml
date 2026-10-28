@@ -1,0 +1,17 @@
+[package]
+name = "restore_state"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+near-sdk = { version = "5.29.1", default-features = false, features = ["unstable"] }
+
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+panic = "abort"
+overflow-checks = true
