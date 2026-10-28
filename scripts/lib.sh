@@ -210,7 +210,7 @@ fetch_release() {
         || die "no GitHub Release $tag"
     hex="$(sed -nE 's/^SHA-256 \(hex\): `([^`]+)`.*/\1/p' <<<"$notes")"
     RELEASE_BS58="$(sed -nE 's/^SHA-256 \(bs58\): `([^`]+)`.*/\1/p' <<<"$notes")"
-    [ -n "$hex" ] && [ -n "$RELEASE_BS58" ] || die "$tag's notes have no hashes"
+    [[ -n "$hex" && -n "$RELEASE_BS58" ]] || die "$tag's notes have no hashes"
     gh release download "$tag" --repo "$GH_REPO" -p trading_account.wasm -D "$dir" >/dev/null
     RELEASE_WASM="$dir/trading_account.wasm"
     [ "$(sha256_hex "$RELEASE_WASM")" = "$hex" ] || die "$tag's wasm doesn't match the hash in its notes"
@@ -232,7 +232,7 @@ fetch_ci_factory() {
     run="$(gh run list --repo "$GH_REPO" --workflow contracts.yml --commit "$commit" \
         --json databaseId,event,conclusion \
         --jq '[.[] | select(.conclusion == "success" and (.event == "push" or .event == "workflow_dispatch"))][0].databaseId')"
-    [ -n "$run" ] && [ "$run" != null ] || die "no successful push or manual CI run for $commit. Start one: gh workflow run contracts.yml --ref <branch>"
+    [[ -n "$run" && "$run" != null ]] || die "no successful push or manual CI run for $commit. Start one: gh workflow run contracts.yml --ref <branch>"
     work_dir
     dir="$WORK_DIR/ci-$commit"
     gh run download "$run" --repo "$GH_REPO" -n contract-wasm -D "$dir" \

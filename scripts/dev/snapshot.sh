@@ -9,7 +9,7 @@
 # shellcheck source=../lib.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../lib.sh"
 
-[ $# -ge 1 ] && [ $# -le 2 ] || usage
+[[ $# -ge 1 && $# -le 2 ]] || usage
 account="$1" network="${2:-mainnet}"
 global_deployer "$network" >/dev/null
 

@@ -73,6 +73,6 @@ run_tx near contract call-function as-transaction "$DAO" add_proposal json-args 
 
 stored="$(view mainnet "$DAO" get_proposal "{\"id\":$next_id}")" \
     || die "couldn't read proposal $next_id back; check get_last_proposal_id"
-[ "$(jq -r .proposer <<<"$stored")" = "$council" ] && [ "$(jq -cS .kind <<<"$stored")" = "$(jq -cS . <<<"$kind")" ] \
+[[ "$(jq -r .proposer <<<"$stored")" = "$council" && "$(jq -cS .kind <<<"$stored")" = "$(jq -cS . <<<"$kind")" ]] \
     || die "proposal $next_id isn't the one just submitted (another landed first?): $stored"
 info "submitted proposal $next_id. It needs 3 of 4 council approvals."

@@ -19,7 +19,7 @@ for arg in "$@"; do
         *) args+=("$arg") ;;
     esac
 done
-[ "${#args[@]}" -ge 1 ] && [ "${#args[@]}" -le 2 ] || usage
+[[ "${#args[@]}" -ge 1 && "${#args[@]}" -le 2 ]] || usage
 account="${args[0]}" network="${args[1]:-mainnet}"
 global_deployer "$network" >/dev/null
 
