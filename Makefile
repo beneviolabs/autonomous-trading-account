@@ -34,8 +34,6 @@ test-unit:
 # build also trusts the key the tests sign quotes with (seed "1click", as in the unit tests), so
 # never deploy it; scripts/dev/flash-dev.sh refuses to.
 test-integration:
-	# The restore rehearsal deploys the dev restore helper.
-	cd tools/restore-state && cargo near build non-reproducible-wasm --no-abi
 	ONE_CLICK_TEST_KEY="ed25519:4xzHWfzwdwnkGbsL3G1C7UBt1v9DX2ZnnE8zmatq3Lba" ./scripts/build-wasm.sh contracts/trading-account
 	cd contracts && cargo test -p trading-account --features integration-tests --lib integration_tests
 

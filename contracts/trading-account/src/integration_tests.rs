@@ -1119,5 +1119,3 @@ async fn test_transfer_to_owner_calls_intents_as_the_trading_account() -> Result
     );
     Ok(())
 }
-
-mod restore;

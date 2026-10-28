@@ -25,7 +25,7 @@ scripts/dev/session.sh <trading account>        # add testnet for a testnet acco
 1. It deploys the restore helper, [`tools/restore-state`](../../tools/restore-state), and calls its `restore`, which writes back every storage entry from the snapshot and removes the ones written since.
 2. It puts back the snapshot's code: its global contract, or the wasm the snapshot saved.
 
-The actions share a receipt, so if any fails nothing changes, and the helper never stays on the account. The sandbox tests rehearse it (`integration_tests/restore.rs`). Afterwards the script checks that storage and code match the snapshot. It reports keys and NEAR that differ, since those aren't contract state; send back any top-up yourself.
+The actions share a receipt, so if any fails nothing changes, and the helper never stays on the account. Afterwards the script checks that storage and code match the snapshot. It reports keys and NEAR that differ, since those aren't contract state; send back any top-up yourself.
 
 ## Reset to v0
 

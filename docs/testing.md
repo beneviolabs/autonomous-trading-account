@@ -5,7 +5,7 @@
 ```bash
 make test               # all of the below
 make test-unit          # unit tests, one crate at a time
-make test-integration   # rebuilds the trading account and the restore helper, then runs the sandbox tests
+make test-integration   # rebuilds the trading account, then runs the sandbox tests
 make shellcheck         # lints scripts/
 ```
 
