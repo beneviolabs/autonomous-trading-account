@@ -21,10 +21,6 @@ V0_HASH="6ziTqYXTX4ASca2dRmgPhVV84jLLLUre4Tym82Lnsf2f"
 DAO="peerfolio.sputnik-dao.near"
 PROD_FACTORY="auth.peerfolio.near"
 
-# The public key `make test-integration` compiles in for the sandbox tests. A wasm
-# containing it accepts quotes the tests sign, so it must never be deployed.
-ONE_CLICK_TEST_PUBLIC_KEY="ed25519:4xzHWfzwdwnkGbsL3G1C7UBt1v9DX2ZnnE8zmatq3Lba"
-
 # Prints the calling script's "# Usage:" line and exits.
 usage() { grep -m1 '^# Usage:' "$0" | sed 's/^# //' >&2; exit 2; }
 die() { echo "error: $*" >&2; exit 1; }
@@ -225,6 +221,17 @@ fetch_release() {
     [ "$(sha256_hex "$RELEASE_WASM")" = "$hex" ] || die "$tag's wasm doesn't match the hash in its notes"
     [ "$(hex_to_bs58 "$hex")" = "$RELEASE_BS58" ] || die "$tag's hex and bs58 hashes disagree"
     info "trading account $1: $RELEASE_BS58 (checked)"
+}
+
+# sandbox_test <wasm>: runs the trading account's sandbox tests against that wasm instead of this
+# checkout's build. The tests fetch a live 1Click quote, so they need the network.
+sandbox_test() {
+    info "running the sandbox tests against $1"
+    work_dir
+    (cd "$REPO_ROOT/contracts" && TRADING_ACCOUNT_WASM="$1" \
+        cargo test -p trading-account --features integration-tests --lib integration_tests) >"$WORK_DIR/sandbox-test.log" 2>&1 \
+        || { grep -E '^test .*FAILED|panicked|^test result' "$WORK_DIR/sandbox-test.log" >&2; die "sandbox tests failed against $1 (log: $WORK_DIR/sandbox-test.log)"; }
+    info "sandbox tests passed: $(grep '^test result' "$WORK_DIR/sandbox-test.log" | tail -1)"
 }
 
 # fetch_ci_factory <commit> <require main: 0|1>: downloads the factory wasm from that commit's

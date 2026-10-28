@@ -9,7 +9,7 @@ Every script prints the transaction and asks before sending it. Add `--dry-run` 
 - [ ] A PR that bumps `CONTRACT_VERSION` is merged to `main` ([Versions](../releasing.md#versions)).
 - [ ] `dev.peerfolio.near` is in your keychain (team password manager), with about 40 NEAR for the global contract's storage. It pays for the global and moves the dev factory's pointer. Arrange funding first.
 - [ ] A council member can propose with their Ledger, and Peerfolio Backend has a release that handles the new version.
-- [ ] `scripts/status.sh` exits 0.
+- [ ] `scripts/status.sh` exits 0, and `make test-integration` has run once on this machine (it downloads the sandbox).
 
 ```bash
 export VERSION=<new CONTRACT_VERSION>
@@ -35,7 +35,7 @@ export VERSION=<new CONTRACT_VERSION>
    scripts/release/point-factory.sh testnet $VERSION
    ```
 
-3. **Deploy the global contract on mainnet.**
+3. **Deploy the global contract on mainnet.** Before it sends anything, the script runs the sandbox tests against the Release's wasm (about a minute, needs the network), and stops if one fails. Run it from `main` at `$VERSION`.
    ```bash
    scripts/release/deploy-global.sh mainnet $VERSION
    ```

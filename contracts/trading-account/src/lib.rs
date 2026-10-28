@@ -302,8 +302,8 @@ impl TradingAccountContract {
             payload: quote_payload,
             signature: quote_signature,
         };
-        let terms =
-            quote::verify(&quote, &quote::trusted_keys()).unwrap_or_else(|e| env::panic_str(&e));
+        let terms = quote::verify(&quote, quote::ONE_CLICK_MANAGER_KEYS)
+            .unwrap_or_else(|e| env::panic_str(&e));
         terms
             .check(
                 &[env::current_account_id(), self.owner_id.clone()],
