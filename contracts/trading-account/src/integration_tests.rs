@@ -5,15 +5,27 @@ use near_workspaces::{
     Account, AccountId, Contract, ContractState, DevNetwork, Worker, operations::Function,
 };
 use serde_json::json;
+use std::process::Command;
 use std::str::FromStr;
+use std::sync::{LazyLock, OnceLock};
 
-const TRADING_ACCOUNT_WASM: &[u8] =
-    include_bytes!("../../target/near/trading_account/trading_account.wasm");
+/// The wasm under test: the TRADING_ACCOUNT_WASM file if it's set, as when
+/// scripts/release/deploy-global.sh tests a release, otherwise this checkout's build.
+static TRADING_ACCOUNT_WASM: LazyLock<Vec<u8>> = LazyLock::new(|| {
+    let path = std::env::var("TRADING_ACCOUNT_WASM").unwrap_or_else(|_| {
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../target/near/trading_account/trading_account.wasm"
+        )
+        .to_string()
+    });
+    std::fs::read(&path).unwrap_or_else(|e| panic!("can't read {path}: {e}"))
+});
 
 /// Deploys and initializes a trading account. Its owner is its own account, so
 /// `trading_account.call(...)` calls as the owner.
 async fn deploy_trading_account(worker: &Worker<impl DevNetwork>) -> Result<Contract> {
-    let trading_account = worker.dev_deploy(TRADING_ACCOUNT_WASM).await?;
+    let trading_account = worker.dev_deploy(&TRADING_ACCOUNT_WASM).await?;
     trading_account
         .call("new")
         .args_json(json!({ "owner_id": trading_account.id() }))
@@ -490,7 +502,7 @@ async fn test_do_upgrade_is_private() -> Result<()> {
 #[tokio::test]
 async fn test_upgrade_fails_when_the_factory_points_elsewhere() -> Result<()> {
     let worker = near_workspaces::sandbox().await?;
-    let current = publish_global(&worker, TRADING_ACCOUNT_WASM).await?;
+    let current = publish_global(&worker, &TRADING_ACCOUNT_WASM).await?;
     let account = create_factory_account(&worker, &current).await?;
     point_factory_at(&worker, account.trading_account.id(), V0_HASH).await?;
     let before = account.trading_account.view_state().await?;
@@ -513,7 +525,7 @@ async fn test_upgrade_fails_when_the_factory_points_elsewhere() -> Result<()> {
 #[tokio::test]
 async fn test_upgrade_fails_when_the_factory_view_fails() -> Result<()> {
     let worker = near_workspaces::sandbox().await?;
-    let current = publish_global(&worker, TRADING_ACCOUNT_WASM).await?;
+    let current = publish_global(&worker, &TRADING_ACCOUNT_WASM).await?;
     // The stub factory's hash is never set, so its view fails.
     let account = create_factory_account(&worker, &current).await?;
     let before = account.trading_account.view_state().await?;
@@ -530,8 +542,8 @@ async fn test_upgrade_fails_when_the_factory_view_fails() -> Result<()> {
 #[tokio::test]
 async fn test_upgrade_reverts_when_migrate_panics() -> Result<()> {
     let worker = near_workspaces::sandbox().await?;
-    let current = publish_global(&worker, TRADING_ACCOUNT_WASM).await?;
-    let candidate = publish_global(&worker, &rehashed(TRADING_ACCOUNT_WASM)).await?;
+    let current = publish_global(&worker, &TRADING_ACCOUNT_WASM).await?;
+    let candidate = publish_global(&worker, &rehashed(&TRADING_ACCOUNT_WASM)).await?;
     let account = create_factory_account(&worker, &current).await?;
     point_factory_at(&worker, account.trading_account.id(), &candidate).await?;
     let state = patch_future_state_version(&worker, account.trading_account.id()).await?;
@@ -606,10 +618,9 @@ async fn assert_upgraded_intact(
     let mut expected = agents.to_vec();
     expected.sort();
     assert_eq!(got, expected);
-    // The quote pays out to another account, so swap gets past the caller check and fails on the
-    // recipient. A dropped agent would fail on the caller check instead.
-    let quote = test_quote(json!({ "recipient": "attacker.near" }));
-    let outcome = swap(agent, ta, &quote, Gas::from_tgas(100)).await?;
+    // The live quote pays out to another account, so swap gets past the caller check and fails on
+    // the recipient. A dropped agent would fail on the caller check instead.
+    let outcome = swap(agent, ta, live_quote(), Gas::from_tgas(100)).await?;
     let failures = format!("{:?}", outcome.failures());
     assert!(
         failures.contains("is not the trading account or its owner"),
@@ -669,7 +680,7 @@ async fn send_bootstrap_batch(
 async fn test_v0_bootstrap_keeps_owner_and_agents() -> Result<()> {
     let worker = near_workspaces::sandbox().await?;
     let v0 = publish_global(&worker, V0_WASM).await?;
-    let candidate = publish_global(&worker, TRADING_ACCOUNT_WASM).await?;
+    let candidate = publish_global(&worker, &TRADING_ACCOUNT_WASM).await?;
     let account = create_factory_account(&worker, &v0).await?;
     let (agent, agents) = add_ten_agents(&worker, &account, "add_authorized_user").await?;
     let temporary = add_temporary_key(&worker, &account).await?;
@@ -700,7 +711,7 @@ async fn test_v0_bootstrap_keeps_owner_and_agents() -> Result<()> {
 async fn test_v0_bootstrap_reverts_when_migrate_panics() -> Result<()> {
     let worker = near_workspaces::sandbox().await?;
     let v0 = publish_global(&worker, V0_WASM).await?;
-    let candidate = publish_global(&worker, TRADING_ACCOUNT_WASM).await?;
+    let candidate = publish_global(&worker, &TRADING_ACCOUNT_WASM).await?;
     let account = create_factory_account(&worker, &v0).await?;
     let temporary = add_temporary_key(&worker, &account).await?;
     let state = patch_future_state_version(&worker, account.trading_account.id()).await?;
@@ -733,8 +744,8 @@ async fn test_v0_bootstrap_reverts_when_migrate_panics() -> Result<()> {
 #[tokio::test]
 async fn test_upgrade_keeps_owner_and_agents() -> Result<()> {
     let worker = near_workspaces::sandbox().await?;
-    let current = publish_global(&worker, TRADING_ACCOUNT_WASM).await?;
-    let candidate = publish_global(&worker, &rehashed(TRADING_ACCOUNT_WASM)).await?;
+    let current = publish_global(&worker, &TRADING_ACCOUNT_WASM).await?;
+    let candidate = publish_global(&worker, &rehashed(&TRADING_ACCOUNT_WASM)).await?;
     let account = create_factory_account(&worker, &current).await?;
     let (agent, agents) = add_ten_agents(&worker, &account, "add_agent").await?;
     point_factory_at(&worker, account.trading_account.id(), &candidate).await?;
@@ -821,7 +832,7 @@ struct SwapAccounts {
 async fn deploy_for_swap(worker: &Worker<Sandbox>) -> Result<SwapAccounts> {
     let intents = patched_contract(worker, "intents.near", &stub_intents()?).await?;
     let trading_account =
-        patched_contract(worker, REAL_QUOTE_ACCOUNT, TRADING_ACCOUNT_WASM).await?;
+        patched_contract(worker, REAL_QUOTE_ACCOUNT, &TRADING_ACCOUNT_WASM).await?;
     let owner = worker.dev_create_account().await?;
     trading_account
         .call("new")
@@ -844,27 +855,70 @@ async fn deploy_for_swap(worker: &Worker<Sandbox>) -> Result<SwapAccounts> {
     })
 }
 
-/// The real quote's recipient and refundTo.
+/// The account live quotes pay out and refund to: a mainnet trading account, which the sandbox
+/// reaches by patching.
 const REAL_QUOTE_ACCOUNT: &str = "implicit_2dde80947980ec0aa6242405.auth.peerfolio.near";
 
-/// The real 1Click quote, `{"payload", "signature"}`.
-fn real_quote() -> serde_json::Value {
-    serde_json::from_str(include_str!("../res/one_click_quote.json")).unwrap()
+/// How much wNEAR the live quote swaps, in yoctoNEAR: 0.02 NEAR.
+const LIVE_QUOTE_AMOUNT: &str = "20000000000000000000000";
+
+/// A live 1Click quote, `{"payload", "signature"}`, that swaps 0.02 wNEAR to USDC for
+/// REAL_QUOTE_ACCOUNT, fetched once per test run. Its deadline is 15 minutes away. Fetching it
+/// moves no funds: nothing is ever deposited to its deposit address.
+fn live_quote() -> &'static serde_json::Value {
+    static QUOTE: OnceLock<serde_json::Value> = OnceLock::new();
+    QUOTE.get_or_init(|| {
+        let deadline = (time::OffsetDateTime::now_utc() + time::Duration::minutes(15))
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap();
+        let request = json!({
+            "dry": false, "swapType": "EXACT_INPUT", "slippageTolerance": 100,
+            "originAsset": "nep141:wrap.near",
+            "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+            "depositType": "INTENTS", "amount": LIVE_QUOTE_AMOUNT,
+            "refundTo": REAL_QUOTE_ACCOUNT, "refundType": "INTENTS",
+            "recipient": REAL_QUOTE_ACCOUNT, "recipientType": "INTENTS",
+            "deadline": deadline, "referral": "peerfolio.near",
+        });
+        let response = run_with_stdin(
+            Command::new("curl").args([
+                "-sS", "--fail-with-body", "https://1click.chaindefuser.com/v0/quote",
+                "-H", "content-type: application/json", "-d", &request.to_string(),
+            ]),
+            "",
+        );
+        // The exact JSON 1Click signed, built the way scripts/dev/session.sh builds it.
+        let payload = run_with_stdin(
+            Command::new("python3").args([
+                "-I",
+                concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/dev/quote_payload.py"),
+            ]),
+            &response,
+        );
+        let response: serde_json::Value = serde_json::from_str(&response)
+            .unwrap_or_else(|e| panic!("1Click's quote response isn't JSON ({e}): {response}"));
+        json!({ "payload": payload.trim_end(), "signature": response["signature"] })
+    })
 }
 
-/// The real quote's terms with a deadline far off and `changes` applied, signed with the test key
-/// `make test-integration` compiles into the build (ONE_CLICK_TEST_KEY), the way 1Click signs.
-fn test_quote(changes: serde_json::Value) -> serde_json::Value {
-    let mut payload: serde_json::Value =
-        serde_json::from_str(real_quote()["payload"].as_str().unwrap()).unwrap();
-    payload["deadline"] = json!("2100-01-01T00:00:00Z");
-    for (key, value) in changes.as_object().unwrap() {
-        payload[key] = value.clone();
-    }
-    let payload = payload.to_string();
-    let message = bs58::encode(crate::utils::hash_payload(payload.as_bytes())).into_string();
-    let key = near_crypto::SecretKey::from_seed(near_crypto::KeyType::ED25519, "1click");
-    json!({ "payload": payload, "signature": key.sign(message.as_bytes()).to_string() })
+/// Runs `command` with `stdin` and returns its stdout, panicking with its output if it fails.
+fn run_with_stdin(command: &mut Command, stdin: &str) -> String {
+    use std::io::Write;
+    let mut child = command
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("can't run {command:?}: {e}"));
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stdin.as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(output.status.success(), "{command:?} failed: {stdout}");
+    stdout
 }
 
 /// `caller` swaps `quote` on `trading_account`, with 1 yocto and `gas`.
@@ -886,6 +940,7 @@ async fn swap(
         .await?)
 }
 
+// A live 1Click quote verifies against 1Click's key through the real host's ed25519_verify, and
 // swap's cross-contract call reaches intents.near from the trading account itself, with the 1 yocto
 // and the transfer taken from the quote, and all the gas swap doesn't use. Whether the real
 // intents.near accepts a contract caller is only shown on mainnet.
@@ -899,13 +954,7 @@ async fn test_swap_calls_intents_as_the_trading_account() -> Result<()> {
         ..
     } = deploy_for_swap(&worker).await?;
 
-    let outcome = swap(
-        &agent,
-        &trading_account,
-        &test_quote(json!({})),
-        Gas::from_tgas(100),
-    )
-    .await?;
+    let outcome = swap(&agent, &trading_account, live_quote(), Gas::from_tgas(100)).await?;
     assert!(outcome.is_success(), "{:#?}", outcome.failures());
     println!(
         "swap burnt {} Tgas over {} receipts",
@@ -918,12 +967,14 @@ async fn test_swap_calls_intents_as_the_trading_account() -> Result<()> {
     let deposit = intents.view("deposit").await?.result;
     assert_eq!(u128::from_le_bytes(deposit.try_into().unwrap()), 1);
     let args: serde_json::Value = intents.view("args").await?.json()?;
+    let quoted: serde_json::Value =
+        serde_json::from_str(live_quote()["payload"].as_str().unwrap())?;
     assert_eq!(
         args,
         json!({
-            "receiver_id": "101823db08284897878219787860f301b04e4e8e51689387b1c395fb73e99ef5",
+            "receiver_id": quoted["depositAddress"],
             "token_id": "nep141:wrap.near",
-            "amount": "20000000000000000000000",
+            "amount": LIVE_QUOTE_AMOUNT,
         })
     );
     // 100 Tgas, less swap's own work and the callback's 10, goes to mt_transfer.
@@ -956,61 +1007,11 @@ async fn test_swap_fails_when_mt_transfer_fails() -> Result<()> {
     } = deploy_for_swap(&worker).await?;
     break_intents(&worker, &intents).await?;
 
-    let outcome = swap(
-        &agent,
-        &trading_account,
-        &test_quote(json!({})),
-        Gas::from_tgas(100),
-    )
-    .await?;
+    let outcome = swap(&agent, &trading_account, live_quote(), Gas::from_tgas(100)).await?;
     assert!(outcome.is_failure(), "{:?}", outcome);
     let failures = format!("{:?}", outcome.failures());
     assert!(
         failures.contains("swap: mt_transfer on intents.near failed"),
-        "{}",
-        failures
-    );
-    Ok(())
-}
-
-// The deadline is checked against the block time.
-#[tokio::test]
-async fn test_swap_rejects_an_expired_quote() -> Result<()> {
-    let worker = near_workspaces::sandbox().await?;
-    let SwapAccounts {
-        trading_account,
-        agent,
-        ..
-    } = deploy_for_swap(&worker).await?;
-    let quote = test_quote(json!({ "deadline": "2026-01-01T00:00:00Z" }));
-
-    let outcome = swap(&agent, &trading_account, &quote, Gas::from_tgas(100)).await?;
-    let failures = format!("{:?}", outcome.failures());
-    assert!(
-        failures.contains("Quote deadline 2026-01-01T00:00:00Z has passed"),
-        "{}",
-        failures
-    );
-    Ok(())
-}
-
-// The real 1Click quote verifies against 1Click's key through the real host's ed25519_verify.
-// After its deadline (2026-10-25) it's refused as expired, which also comes after the signature
-// check, so either outcome shows the signature verified.
-#[tokio::test]
-async fn test_swap_verifies_a_real_1click_quote() -> Result<()> {
-    let worker = near_workspaces::sandbox().await?;
-    let SwapAccounts {
-        trading_account,
-        agent,
-        ..
-    } = deploy_for_swap(&worker).await?;
-
-    let outcome = swap(&agent, &trading_account, &real_quote(), Gas::from_tgas(100)).await?;
-    let failures = format!("{:?}", outcome.failures());
-    assert!(
-        outcome.is_success()
-            || failures.contains("Quote deadline 2026-10-25T16:21:59.865Z has passed"),
         "{}",
         failures
     );

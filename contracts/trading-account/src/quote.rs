@@ -14,28 +14,6 @@ pub const ONE_CLICK_MANAGER_KEYS: &[[u8; 32]] = &[[
     57, 140, 239, 29, 242, 233, 68, 87, 183, 233, 67,
 ]];
 
-/// One more key to trust, `ed25519:<base58>`, compiled in from the ONE_CLICK_TEST_KEY environment
-/// variable. Only `make test-integration` sets it, for the build the sandbox tests run, so they can sign
-/// their own quotes. Release builds pass no environment into their container
-/// (`passed_env = []`), so they trust 1Click's key alone.
-const TEST_KEY: Option<&str> = option_env!("ONE_CLICK_TEST_KEY");
-
-/// The keys swap accepts quotes from: 1Click's, plus TEST_KEY in a test build.
-pub fn trusted_keys() -> Vec<[u8; 32]> {
-    let mut keys = ONE_CLICK_MANAGER_KEYS.to_vec();
-    if let Some(key) = TEST_KEY {
-        let key = key
-            .strip_prefix("ed25519:")
-            .and_then(|encoded| bs58::decode(encoded).into_vec().ok())
-            .and_then(|bytes| bytes.try_into().ok())
-            .unwrap_or_else(|| {
-                env::panic_str("ONE_CLICK_TEST_KEY is not ed25519:<base58 of 32 bytes>")
-            });
-        keys.push(key);
-    }
-    keys
-}
-
 /// The highest `slippageTolerance` a quote may ask for, in basis points.
 pub const MAX_SLIPPAGE_BPS: u32 = 200;
 

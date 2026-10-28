@@ -43,6 +43,8 @@ wat = "1"
 # Encode code hashes and owner ids in integration_tests.rs.
 bs58 = "0.5.1"
 hex = "0.4.3"
+# Formats the live 1Click quote's deadline in integration_tests.rs.
+time = { version = "0.3.55", features = ["formatting"] }
 # Broadcasts the global-contract transactions to the sandbox in integration_tests.rs. The version
 # near-workspaces already uses; no TLS needed for the local RPC.
 reqwest = { version = "0.12", default-features = false }

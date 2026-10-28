@@ -688,18 +688,6 @@ fn test_manager_key_is_the_one_in_1clicks_sdk() {
     assert_eq!(quote::ONE_CLICK_MANAGER_KEYS, [sdk_key.as_slice()]);
 }
 
-// Without ONE_CLICK_TEST_KEY at build time, as in every release build, only 1Click's key is
-// trusted.
-#[test]
-fn test_trusted_keys_are_1clicks_alone() {
-    assert_eq!(
-        option_env!("ONE_CLICK_TEST_KEY"),
-        None,
-        "unit tests run without a test key"
-    );
-    assert_eq!(quote::trusted_keys(), quote::ONE_CLICK_MANAGER_KEYS);
-}
-
 #[test]
 fn test_verify_accepts_a_real_1click_quote() {
     let terms = quote::verify(&real_quote(), quote::ONE_CLICK_MANAGER_KEYS).unwrap();

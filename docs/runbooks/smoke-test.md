@@ -1,6 +1,6 @@
 # Runbook: smoke test a release on mainnet
 
-Checks a trading account release against the real `intents.near` and 1Click, which the sandbox tests stub. Run it after the dev factory points at the release ([release runbook](release-trading-account.md), step 5), on an account created from `auth.dev.peerfolio.near`.
+Checks a trading account release against the real `intents.near` and 1Click, which the sandbox tests stub or only quote. Run it after the dev factory points at the release ([release runbook](release-trading-account.md), step 5), on an account created from `auth.dev.peerfolio.near`.
 
 The commands are in the [lifecycle](../trading-account.md#lifecycle). Use `auth.dev.peerfolio.near` and `network-config mainnet`. Steps marked 💸 move funds, so whoever holds the test funds runs them. A [dev session](../dev-session.md)'s menu can make the swap, `transfer_to_owner` and agent calls; decline its flash so the account keeps the release's code.
 

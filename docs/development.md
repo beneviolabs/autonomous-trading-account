@@ -14,7 +14,7 @@ How to build and test the contracts, from a change on your machine to a release.
 
 0. **Follow the [rules for changing the trading account](#changing-the-trading-account)**: which version to bump, and how to migrate state.
 1. **Unit tests** on a mocked chain: `make test-unit`.
-2. **Sandbox tests** against a local neard with a stub `intents.near`: `make test-integration`.
+2. **Sandbox tests** against a local neard with a stub `intents.near` and a live 1Click quote: `make test-integration`.
 3. **Try it on one live account**, when the change touches `intents.near` or 1Click: a [dev session](dev-session.md) flashes your checkout onto a mainnet trading account and puts it back afterwards.
 4. **CI** runs all the checks on the pull request ([CI](#ci)).
 5. **Release** it once merged, with the [runbook](releasing.md#which-release-do-i-need) for what changed. Each trading account release ends with the [smoke test](runbooks/smoke-test.md) on mainnet.
@@ -95,7 +95,7 @@ make test-integration   # rebuilds the trading account, then runs the sandbox te
 make shellcheck         # lints scripts/
 ```
 
-The integration tests embed `contracts/target/near/trading_account/trading_account.wasm` (a dev build) at compile time and only compile with `--features integration-tests`. Run them through `make test-integration`, which rebuilds the wasm first; `cargo test --features integration-tests` on its own runs them against whatever wasm was built last. A bare `cargo test` doesn't run them at all. To pass test filters or `--nocapture`, run the `cargo test` line from the `Makefile` after it.
+The integration tests load `contracts/target/near/trading_account/trading_account.wasm` (this checkout's build), or the file `TRADING_ACCOUNT_WASM` names, and only compile with `--features integration-tests`. Run them through `make test-integration`, which rebuilds the wasm first; `cargo test --features integration-tests` on its own runs them against whatever wasm was built last. A bare `cargo test` doesn't run them at all. To pass test filters or `--nocapture`, run the `cargo test` line from the `Makefile` after it.
 
 Test one package per command (`make test-unit` does). The contracts enable different near-sdk features, and `--workspace` would unify them.
 
@@ -105,10 +105,10 @@ Writing tests:
 
 Where `swap` is tested:
 - `unit_tests.rs`: the quote checks (`test_verify_*`, `test_check_*`, `test_parse_deadline_ms_*`) and `swap` on the mocked chain (`test_swap_*`).
-- `integration_tests.rs`: `swap`'s cross-contract call in the sandbox (`test_swap_*`), against a stub `intents.near`.
-- Only a mainnet run checks the real `intents.near` and 1Click: a [dev session](dev-session.md) before merging, and the [smoke test](runbooks/smoke-test.md) after a release.
+- `integration_tests.rs`: `swap`'s cross-contract call in the sandbox (`test_swap_*`), with a live 1Click quote against a stub `intents.near`.
+- Only a mainnet run checks the real `intents.near` and a whole swap: a [dev session](dev-session.md) before merging, and the [smoke test](runbooks/smoke-test.md) after a release.
 
-**The sandbox build trusts a test key.** `make test-integration` builds the wasm with `ONE_CLICK_TEST_KEY` set, so the contract also accepts quotes signed with the tests' key and the sandbox tests can sign their own. Don't set it for any other build. `scripts/dev/flash-dev.sh` builds without it and refuses a wasm that contains the key. Release builds pass no environment into their container, so they trust 1Click's key alone.
+**The sandbox tests need the network.** They fetch one live 1Click quote per run, from 1Click's quote API with `curl`, paying out to a mainnet trading account the sandbox patches in. Nothing is deposited, so no funds move. Because the contract trusts only 1Click's key, the sandbox tests run the same wasm that's released, and `scripts/release/deploy-global.sh` runs them against a release before deploying it. An expired quote is only tested in the unit tests, since 1Click won't sign one.
 
 Gotchas:
 - **The first integration test run downloads the sandbox.** `near-workspaces` fetches neard 2.13.4 (the version mainnet runs) the first time the tests start a sandbox, and caches it. To run offline, or with a binary you already have, set `NEAR_SANDBOX_BIN_PATH=/path/to/near-sandbox`.

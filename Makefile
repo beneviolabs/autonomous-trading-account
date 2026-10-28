@@ -30,11 +30,9 @@ shellcheck:
 test-unit:
 	cd contracts && for p in $(PACKAGES); do cargo test -p $$p --lib || exit 1; done
 
-# The sandbox tests embed the trading account wasm at compile time, so it's rebuilt first. That
-# build also trusts the key the tests sign quotes with (seed "1click", as in the unit tests), so
-# never deploy it; scripts/dev/flash-dev.sh refuses to.
+# The sandbox tests run the trading account wasm this checkout builds, so it's rebuilt first.
 test-integration:
-	ONE_CLICK_TEST_KEY="ed25519:4xzHWfzwdwnkGbsL3G1C7UBt1v9DX2ZnnE8zmatq3Lba" ./scripts/build-wasm.sh contracts/trading-account
+	./scripts/build-wasm.sh contracts/trading-account
 	cd contracts && cargo test -p trading-account --features integration-tests --lib integration_tests
 
 test: test-unit test-integration

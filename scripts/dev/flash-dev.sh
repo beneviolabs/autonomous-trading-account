@@ -5,9 +5,8 @@
 #
 # Usage: scripts/dev/flash-dev.sh <trading account> [mainnet|testnet] [--dry-run]
 #
-# Builds the trading account without ONE_CLICK_TEST_KEY and refuses if the wasm still trusts the
-# test key. Deploys it with migrate, signed from the keychain as the trading account (its key
-# must be there), then checks the code hash, version, owner and agents.
+# Builds the trading account and deploys it with migrate, signed from the keychain as the trading
+# account (its key must be there), then checks the code hash, version, owner and agents.
 # shellcheck source=../lib.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../lib.sh"
 
@@ -32,12 +31,9 @@ before="$(read_state)" || die "couldn't read $account's owner and agents on $net
 
 info "building the trading account"
 work_dir
-env -u ONE_CLICK_TEST_KEY "$REPO_ROOT/scripts/build-wasm.sh" "$REPO_ROOT/contracts/trading-account" >"$WORK_DIR/build.log" 2>&1 \
+"$REPO_ROOT/scripts/build-wasm.sh" "$REPO_ROOT/contracts/trading-account" >"$WORK_DIR/build.log" 2>&1 \
     || { tail -20 "$WORK_DIR/build.log" >&2; die "build failed"; }
 wasm="$REPO_ROOT/contracts/target/near/trading_account/trading_account.wasm"
-if LC_ALL=C grep -aqF "$ONE_CLICK_TEST_PUBLIC_KEY" "$wasm"; then
-    die "$wasm trusts the sandbox tests' quote key. Not deploying it."
-fi
 bs58="$(hex_to_bs58 "$(sha256_hex "$wasm")")"
 info "flashing $account on $network with a dev build of $(git -C "$REPO_ROOT" rev-parse --short HEAD) ($bs58)"
 [ -z "$(git -C "$REPO_ROOT" status --porcelain -- contracts)" ] || info "note: contracts/ has uncommitted changes, and they're in this build"
