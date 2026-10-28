@@ -17,12 +17,15 @@ The per-user contract, created by the [factory](factory.md) at `implicit_<24hex>
   - 1Click signed it. The key is compiled in ([`quote.rs`](../contracts/trading-account/src/quote.rs)), so rotating it takes a release and an upgrade by each owner. Once the signature verifies, the quote's values are trusted as 1Click's; the contract doesn't sanity-check amounts.
   - It's live, not dry. Its `recipient` and `refundTo` are each the trading account or the owner, and its deposit, recipient and refund types are all `INTENTS`. It names no virtual-chain recipient or custom recipient message. Its `slippageTolerance` is at most 200 bps.
   - Its `deadline` is after the block time. That's the quote's deposit deadline, which 1Click sets (3 days in the live test). There's no limit on the quote's age.
-- **A valid quote can be reused** until its deadline. Each use is another deposit to the same address, which 1Click swaps or refunds to `refundTo`. This is accepted by design: the funds still only go back to the user.
+- **A valid quote can be reused** until its deadline. Each use is another deposit to the same address, which 1Click swaps or refunds to `refundTo`. This is accepted by design: the swapped output and refunds still only go back to the user, though each use pays the quote's fees again (see below).
 - **Cash-out** is a swap with `recipient` set to the owner (liquidation), followed by the owner's own `ft_withdraw` from intents. The trading account has no withdraw method.
-- **What a stolen agent key can still do.** It can't send funds to an account of its own, but it can lose value:
-  - 1Click's signature doesn't cover `appFees`, and 1Click honors fees any caller sets. A quote can pay a fee to anyone, and the contract can't see it.
-  - It can swap at bad prices on illiquid tokens, or swap back and forth, losing fees and up to 2% slippage each time. The contract has no price oracle.
-  - A compromised 1Click key would get past the quote check entirely.
+- **The contract doesn't protect funds from a compromised agent.** It makes sure a swap's output and refunds go to the user's accounts, but it doesn't limit how much value a swap loses on the way. Anyone holding an agent key, such as a stolen Peerfolio bot key, can drain the account a little at a time ([#189](https://github.com/beneviolabs/autonomous-trading-account/issues/189)):
+  - **Fees.** Whoever requests a quote can add `appFees` paid to any address, up to 4.75% of the swap (1Click caps all fees at 5%, its own share included). 1Click doesn't sign `appFees`, so the contract can't see the fee or who gets it. The fee comes out of the deposit, so the user receives less. The same gap lets a thief quietly redirect Peerfolio's own fee.
+  - **Prices.** Each swap can lose up to 2% to slippage, and more at bad prices on illiquid tokens. The contract has no reference price.
+  - **Repetition.** Nothing limits how often an agent swaps, so it can swap back and forth, or reuse a quote, paying fees and slippage every time.
+  - **1Click's key.** A compromised 1Click key would get past the quote check entirely.
+
+  Only add an agent you'd trust with the trading account's funds.
 - **Keys registered on `intents.near` bypass the contract.** Any public key registered for the trading account on `intents.near` can sign intents that move its balance anywhere. `delete_key` doesn't unregister a key; that takes `intents.near`'s `remove_public_key`, called by the account.
 - **Only upgraded accounts get these checks.** Trading accounts on v0 have no `swap`, and sign any call on v0's wider allowlist, including `ft_withdraw` and `mt_transfer` to any receiver.
 - **To cut off an agent**, remove it with `remove_agent`. It takes effect at once.
