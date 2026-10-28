@@ -4,9 +4,10 @@
 # Usage: scripts/dev/restore.sh <snapshot.json> [--dry-run]
 #
 # One transaction, signed from the keychain as the trading account: deploy the restore helper
-# (restore.wat), call its restore to write back every snapshot entry and remove the ones
-# written since, then put back the snapshot's code. The actions share a receipt, so if any fails
-# nothing changes, and the helper never stays on the account. Then checks storage and code match.
+# (scripts/dev/restore-state), call its restore to write back every snapshot entry and remove
+# the ones written since, then put back the snapshot's code. The actions share a receipt, so if
+# any fails nothing changes, and the helper never stays on the account. Then checks storage and
+# code match.
 #
 # Access keys and NEAR aren't contract state, so it only reports how they differ from the
 # snapshot, with the commands to put them back.
@@ -24,6 +25,7 @@ done
 [ "${#args[@]}" = 1 ] || usage
 snapshot="${args[0]}"
 [ -f "$snapshot" ] || die "no snapshot at $snapshot"
+build_restore_helper
 account="$(jq -r .account "$snapshot")" network="$(jq -r .network "$snapshot")"
 
 global="$(jq -r '.code.global_contract_hash // empty' "$snapshot")"
@@ -39,13 +41,13 @@ else
 fi
 
 now="$(view_state "$network" "$account")"
-writes="$(jq -c .storage "$snapshot")"
-removes="$(jq -c --argjson now "$now" '[$now[].key] - [.storage[].key]' "$snapshot")"
-info "restoring $account to $(jq -r .taken_at "$snapshot"): writes $(jq length <<<"$writes") entries, removes $(jq length <<<"$removes"), code back to $code_label"
+restore_args="$(jq -c --argjson now "$now" \
+    '{entries: (.storage | map([.key, .value])), remove: ([$now[].key] - [.storage[].key])}' "$snapshot")"
+info "restoring $account to $(jq -r .taken_at "$snapshot"): writes $(jq '.entries | length' <<<"$restore_args") entries, removes $(jq '.remove | length' <<<"$restore_args"), code back to $code_label"
 
 run_tx near transaction construct-transaction "$account" "$account" \
     add-action deploy-contract use-file "$RESTORE_HELPER" with-init-call restore \
-    base64-args "$(restore_args "$writes" "$removes")" prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' \
+    json-args "$restore_args" prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' \
     add-action "${code_back[@]}" \
     skip network-config "$network" sign-with-keychain send
 [ "$DRY_RUN" = 1 ] && exit 0

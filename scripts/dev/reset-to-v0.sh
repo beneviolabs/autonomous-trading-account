@@ -10,7 +10,7 @@
 # step down to v1 here when you need it.
 #
 # One transaction, signed from the keychain as the trading account: deploy the restore helper
-# (restore.wat), call its restore to write the v0 STATE, then switch to the v0 global code. That
+# (scripts/dev/restore-state), call its restore to write the v0 STATE, then switch to the v0 global code. That
 # also removes the account's own code. The actions share a receipt, so if any fails nothing
 # changes, and the helper never stays on the account. Then checks the owner, agents and signer
 # read back on v0.
@@ -52,10 +52,11 @@ if state[0] != 1:
 print(base64.b64encode(state[1:] + len(signer).to_bytes(4, "little") + signer).decode())
 ' "$state" "$signer_id")" || die "can't reset $account"
 
+build_restore_helper
 info "resetting $account to v0 ($V0_HASH): owner $owner, agents $agents, signer $signer_id"
 run_tx near transaction construct-transaction "$account" "$account" \
     add-action deploy-contract use-file "$RESTORE_HELPER" with-init-call restore \
-    base64-args "$(restore_args "[{\"key\":\"U1RBVEU=\",\"value\":\"$v0_state\"}]" '[]')" \
+    json-args "{\"entries\":[[\"U1RBVEU=\",\"$v0_state\"]]}" \
     prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' \
     add-action use-global-contract use-global-hash "$V0_HASH" without-init-call \
     skip network-config "$network" sign-with-keychain send

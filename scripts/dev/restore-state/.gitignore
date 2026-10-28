@@ -1,0 +1,3 @@
+# A dev tool, so its dependencies aren't pinned by a lockfile.
+Cargo.lock
+target/

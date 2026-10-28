@@ -247,23 +247,12 @@ fetch_ci_factory() {
 
 # --- Dev ------------------------------------------------------------------------------------
 
-# The helper restore.sh and reset-to-v0.sh deploy for one transaction (source: restore.wat).
-RESTORE_HELPER="$REPO_ROOT/scripts/dev/restore.wasm"
-
-# restore_args <writes> <removes>: the helper's restore arguments, base64. <writes> is a JSON
-# array of {key, value} and <removes> a JSON array of keys, all base64 as view_state prints them.
-restore_args() {
-    python3 -I -c '
-import base64, json, sys
-out = b""
-for entry in json.loads(sys.argv[1]):
-    key, value = base64.b64decode(entry["key"]), base64.b64decode(entry["value"])
-    out += b"\x01" + len(key).to_bytes(4, "little") + key + len(value).to_bytes(4, "little") + value
-for key in json.loads(sys.argv[2]):
-    key = base64.b64decode(key)
-    out += b"\x02" + len(key).to_bytes(4, "little") + key
-print(base64.b64encode(out).decode())
-' "$1" "$2"
+# Builds scripts/dev/restore-state, the helper restore.sh and reset-to-v0.sh deploy for one
+# transaction. Sets RESTORE_HELPER to its wasm.
+build_restore_helper() {
+    (cd "$REPO_ROOT/scripts/dev/restore-state" && cargo near build non-reproducible-wasm --no-abi) >/dev/null 2>&1 \
+        || die "couldn't build scripts/dev/restore-state (run cargo near build non-reproducible-wasm in it to see why)"
+    RESTORE_HELPER="$REPO_ROOT/scripts/dev/restore-state/target/near/restore_state.wasm"
 }
 
 # --- Signing --------------------------------------------------------------------------------
