@@ -6,7 +6,8 @@
 # Only for a new factory account, for example when the factory's stored state changes. To update
 # an existing factory's code, use deploy-factory.sh.
 #
-# - The factory account is created by its parent account (auth.peerfolio.near by peerfolio.near)
+# - The factory account is created by its parent account (auth.peerfolio.near by peerfolio.near,
+#   auth.dev.peerfolio.near by dev.peerfolio.near)
 #   with 4 NEAR, signed from the keychain, and gets a new keychain key.
 # - The wasm comes from the commit's successful push or manual CI run (main only on mainnet).
 # - new() gets the owner, the network and the trading account version's global hash, which must
