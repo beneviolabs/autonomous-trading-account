@@ -27,7 +27,11 @@ export VERSION=<new CONTRACT_VERSION>
    ```bash
    gh release view trading-account/v$VERSION
    ```
-   If CI fails because the tag doesn't match `CONTRACT_VERSION` or isn't on `main`, delete the tag (`git push origin :refs/tags/trading-account/v$VERSION`), fix it and tag again.
+   If CI fails because the tag doesn't match `CONTRACT_VERSION` or isn't on `main`, delete the tag on GitHub and locally, fix it, and tag again:
+   ```bash
+   git push origin :refs/tags/trading-account/v$VERSION
+   git tag -d trading-account/v$VERSION
+   ```
 
 2. *Optional:* **rehearse on testnet.** Needs `peerfolio.peerfolio.testnet` in your keychain, which pays for the testnet global and owns the testnet factory. Then create an account and run through the [lifecycle](../trading-account.md#lifecycle).
    ```bash
