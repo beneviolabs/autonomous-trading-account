@@ -1,6 +1,6 @@
 # Runbook: release factory code
 
-Redeploys new factory code onto the existing factories, keeping their stored state: owner, MPC signer and trading account pointer. Only for changes that read the same stored fields, such as bug fixes, gas tweaks and new view methods. If the `TradingAccountFactory` struct changed, [deploy a new factory](../factory.md#deploy-a-new-factory) instead. Background: [Builds and releases](../releases.md).
+Redeploys new factory code onto the existing factories, keeping their stored state: owner, MPC signer and trading account pointer. Only for changes that read the same stored fields, such as bug fixes, gas tweaks and new view methods. If the `TradingAccountFactory` struct changed, [deploy a new factory](new-factory.md) instead. Background: [Releasing](../releasing.md).
 
 Every script prints the transaction and asks before sending it. Add `--dry-run` to only print.
 

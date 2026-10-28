@@ -1,12 +1,12 @@
 # Runbook: release trading account code
 
-Publishes new trading account code and points the factories at it: dev first, prod through the DAO. Existing accounts change only when their owners [upgrade](../trading-account.md#upgrading-a-trading-account). Background: [Builds and releases](../releases.md).
+Publishes new trading account code and points the factories at it: dev first, prod through the DAO. Existing accounts change only when their owners [upgrade](../trading-account.md#upgrading-a-trading-account). Background: [Releasing](../releasing.md).
 
 Every script prints the transaction and asks before sending it. Add `--dry-run` to only print. Run `scripts/release/<script>.sh` with no arguments for its usage.
 
 ## Before you start
 
-- [ ] A PR that bumps `CONTRACT_VERSION` is merged to `main` ([Versions](../releases.md#versions)).
+- [ ] A PR that bumps `CONTRACT_VERSION` is merged to `main` ([Versions](../releasing.md#versions)).
 - [ ] `peerfolio.near` is in your keychain, with about 40 NEAR for the global contract's storage. Arrange funding or reimbursement first.
 - [ ] `dev.peerfolio.near` is in your keychain (team password manager).
 - [ ] A council member can propose with their Ledger, and Peerfolio Backend has a release that handles the new version.

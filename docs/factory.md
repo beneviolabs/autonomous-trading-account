@@ -24,20 +24,4 @@ Both kinds of release change it, as a step before prod: [releasing trading accou
 
 ## Deploy a new factory
 
-Use this only for a new factory account, for example when the factory's stored state changes. To update an existing factory's code, [release factory code](runbooks/release-factory.md) instead. [`scripts/release/new-factory.sh`](../scripts/release/new-factory.sh) does it in one go:
-
-1. It creates the factory account from its parent account (`auth.peerfolio.near` from `peerfolio.near`) with 4 NEAR, and saves the new account's key to the keychain.
-2. It deploys the factory wasm from the given commit's CI run, and calls `new` with the owner, the network and the trading account version's global hash.
-3. It checks the code hash, owner and pointer, then offers to delete the key it created. A factory owned by the DAO should have no keys; decline for a dev or testnet factory, which keeps its key.
-
-```bash
-scripts/release/new-factory.sh testnet auth.peerfolio.testnet peerfolio.peerfolio.testnet <version> <commit>
-scripts/release/new-factory.sh mainnet auth.peerfolio.near peerfolio.sputnik-dao.near <version> <commit>
-```
-
-`<version>` is a trading account release whose global contract is already on that network, or `v0`. On mainnet, `<commit>` must be on `main`.
-
-- The factory ID can be at most 30 characters, and its parent's key has to be in your keychain. If the parent uses a Ledger, temporarily add a keychain full-access key to it, run the script, then delete the key.
-- The previous factory, `auth-v1.peerfolio.near`, was replaced in January 2026.
-
-Afterwards, point the app at the new factory: `AUTH_CREATOR` / `VITE_AUTH_CREATOR_*` in Peerfolio Backend (local `.env`, Render and Cloudflare).
+A new factory account is needed when the factory's stored state changes. Follow the [runbook](runbooks/new-factory.md). Code-only changes are [redeployed](runbooks/release-factory.md) onto the existing factories instead.

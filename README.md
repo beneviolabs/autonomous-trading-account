@@ -31,37 +31,28 @@ agent ──swap(1Click quote)──▶ trading account ──mt_transfer──�
 ## Terms
 
 - **Owner**: the user's NEAR implicit account (64 hex chars). It creates and controls its trading account.
-- **Agent**: an account allowed to call `swap`. At most 10 per trading account.
+- **Agent**: an account the owner allows to call `swap` and `transfer_to_owner`, usually Peerfolio's bot: `bot.peerfolio.near` in production, `bot.dev.peerfolio.near` in staging and local dev. At most 10 per trading account.
+- **Trading account**: the per-user contract the factory creates, holding the funds agents may trade with.
+- **1Click quote**: a swap quote from NEAR Intents' 1Click API, signed with 1Click's key. A live quote has a `depositAddress`; depositing `amountIn` of `originAsset` there starts the swap.
 - **MPC key**: the key NEAR's MPC signer derives for a trading account. Trading accounts on v0 have it as a full-access key, and it signs their agents' transactions. From 1.0.0 nothing signs for the trading account.
 - **Global code hash**: the hash of the trading account code deployed once as a [NEP-591 global contract](https://github.com/near/NEPs/blob/master/neps/nep-0591.md). The factory creates new trading accounts with it.
 
 Some on-chain names still say "proxy" for the trading account: factory methods such as `create_proxy_global`, the factory's `global_proxy_base58_hash` argument, and some log messages. Code identifiers use the terms above.
 
-## Docs
+## Where to go
 
-- [Trading account](docs/trading-account.md): security model, lifecycle with commands, and deleting an account.
-- [Factory](docs/factory.md): account naming and deploying a new factory.
-- [Builds and releases](docs/releases.md): release builds, versions, and how each kind of release works.
-- [Contract reference](docs/reference.md): methods, `swap` arguments and errors.
-- [Testing](docs/testing.md): local tests and CI.
-- Runbooks: [release trading account code](docs/runbooks/release-trading-account.md), [release factory code](docs/runbooks/release-factory.md), [try unreleased code on one account](docs/runbooks/dev-deploy.md), [smoke test a release](docs/runbooks/smoke-test.md).
-
-## Development
-
-Prerequisites:
-- rustup. `rust-toolchain.toml` pins Rust 1.97.1, and rustup installs it automatically.
-- cargo-near 0.22.0: `cargo install cargo-near --version 0.22.0 --locked`. The build scripts refuse other versions.
-- [near-cli-rs](https://github.com/near/near-cli-rs), tested with 0.22. Run `near login` for each account you'll sign as.
-- Docker, only to reproduce a release build locally. Releases normally use CI's build.
-- For the release and dev scripts: `gh` (signed in), `jq`, `curl` and `python3`. `shellcheck` to lint them.
+- **Changing contract code:** [Development](docs/development.md): prerequisites, tests, builds and CI, in the order a change goes through them. To try a change on one live account, run a [dev session](docs/dev-session.md).
+- **Releasing:** [Releasing](docs/releasing.md) says which release you need and links its runbook:
+  - [release trading account code](docs/runbooks/release-trading-account.md),
+  - [release factory code](docs/runbooks/release-factory.md),
+  - [deploy a new factory](docs/runbooks/new-factory.md),
+  - [smoke test a release](docs/runbooks/smoke-test.md) on mainnet.
+- **Understanding the contracts:** [Trading account](docs/trading-account.md) (security model, lifecycle with commands, upgrading and deleting), [Factory](docs/factory.md) (account naming, the dev factory) and the [contract reference](docs/reference.md) (methods, `swap` arguments and errors).
 
 ```bash
 make test         # unit and integration tests
-make release      # reproducible release build (CI runs it too)
 make help         # all targets
 ```
-
-The contracts form one Cargo workspace in `contracts/`, with a shared `Cargo.lock` and `target/`. To share code between them, add a library crate to the workspace that both depend on by path. Keep it to plain types; it must not define a `#[near]` contract. A good first candidate is the factory's `TradingAccountInitArgs`, which has to match the arguments the trading account's `new` reads. Today only a factory unit test checks the arguments the factory sends.
 
 ## Audits
 
