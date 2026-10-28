@@ -34,6 +34,9 @@ mkdir -p "$snapshots"
 snapshot="$snapshots/$account-$(date +%Y%m%dT%H%M%S).json"
 "$DEV/snapshot.sh" "$account" "$network" >"$snapshot"
 info "snapshot saved: $snapshot"
+if [ -z "$(view_account "$network" "$account" | jq -r '.global_contract_hash // empty')" ]; then
+    info "note: $account runs its own code, so restoring the snapshot brings that code back. To get back to a global, reset to v0 (menu: 0)."
+fi
 restored=0
 trap '[ "$restored" = 1 ] || echo "Not restored. To restore later: scripts/dev/restore.sh $snapshot" >&2' EXIT
 
@@ -116,6 +119,7 @@ What next?
   4) add or remove an agent
   5) re-flash (rebuild after code changes)
   r) restore to the snapshot and quit
+  0) reset to the v0 global, removing its own code, and quit
   q) quit without restoring
 EOF
     read -r -p "> " choice || choice=q
@@ -126,6 +130,7 @@ EOF
         4) agent || true ;;
         5) "$DEV/flash-dev.sh" "$account" "$network" || true ;;
         r) "$DEV/restore.sh" "$snapshot" && restored=1 && exit 0 ;;
+        0) "$DEV/reset-to-v0.sh" "$account" "$network" && restored=1 && exit 0 ;;
         q) exit 0 ;;
         *) echo "?" ;;
     esac
