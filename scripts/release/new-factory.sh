@@ -30,8 +30,11 @@ global_deployer "$network" >/dev/null
 root="${factory#*.}"
 [ "$root" != "$factory" ] || die "$factory has no parent account to create it"
 [ "${#factory}" -le 30 ] || die "$factory is over 30 characters, so trading account IDs wouldn't fit NEAR's 64"
-view_account "$network" "$factory" >/dev/null 2>&1 \
-    && die "$factory already exists. To update its code, use deploy-factory.sh."
+# An account with no code is a run that stopped after creating it: carry on from the deploy.
+existing="$(view_account "$network" "$factory" 2>/dev/null | jq -r .code_hash)" || existing=""
+if [ -n "$existing" ] && [ "$existing" != 11111111111111111111111111111111 ]; then
+    die "$factory already runs code. To update it, use deploy-factory.sh."
+fi
 
 if [ "$version" = v0 ]; then
     hash="$V0_HASH"
@@ -44,9 +47,13 @@ require_main=0
 [ "$network" = mainnet ] && require_main=1
 fetch_ci_factory "$commit" "$require_main"
 
-info "creating $factory from $root with 4 NEAR"
-run_tx near account create-account fund-myself "$factory" '4 NEAR' autogenerate-new-keypair save-to-keychain \
-    sign-as "$root" network-config "$network" sign-with-keychain send
+if [ -z "$existing" ]; then
+    info "creating $factory from $root with 4 NEAR"
+    run_tx near account create-account fund-myself "$factory" '4 NEAR' autogenerate-new-keypair save-to-keychain \
+        sign-as "$root" network-config "$network" sign-with-keychain send
+else
+    info "$factory exists with no code, so it was created by an earlier run. Deploying to it."
+fi
 
 init_args="{\"owner_id\":\"$owner\",\"network\":\"$network\",\"global_proxy_base58_hash\":\"$hash\"}"
 info "deploying the factory and calling new($init_args)"

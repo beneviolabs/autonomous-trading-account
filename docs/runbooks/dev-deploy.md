@@ -19,4 +19,4 @@ Puts a dev build of your checkout straight onto one trading account, to try code
 
 ## Going back to released code
 
-From 1.0.0, the owner [upgrades](../trading-account.md#upgrading-a-trading-account) the account to the hash its factory points at. That switches it back to the global contract, and its own code's storage is freed.
+From 1.0.0, the owner [upgrades](../trading-account.md#upgrading-a-trading-account) the account to the hash its factory points at. That switches it back to the global contract.
