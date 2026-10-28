@@ -980,6 +980,43 @@ async fn test_swap_callers() -> Result<()> {
     Ok(())
 }
 
+/// Swaps intents.near's code for a contract with no methods, so every call to it fails.
+async fn break_intents(worker: &Worker<Sandbox>, intents: &Contract) -> Result<()> {
+    let code = wat::parse_str(r#"(module (memory (export "memory") 1))"#)?;
+    worker.patch(intents.id()).code(&code).transact().await?;
+    Ok(())
+}
+
+// A failed mt_transfer reaches swap_callback through the promise chain and fails the caller's
+// transaction, so the bot can't mistake it for a swap.
+#[tokio::test]
+async fn test_swap_fails_when_mt_transfer_fails() -> Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let SwapAccounts {
+        trading_account,
+        intents,
+        agent,
+        ..
+    } = deploy_for_swap(&worker).await?;
+    break_intents(&worker, &intents).await?;
+
+    let outcome = swap(
+        &agent,
+        &trading_account,
+        &test_quote(json!({})),
+        Gas::from_tgas(100),
+    )
+    .await?;
+    assert!(outcome.is_failure(), "{:?}", outcome);
+    let failures = format!("{:?}", outcome.failures());
+    assert!(
+        failures.contains("swap: mt_transfer on intents.near failed"),
+        "{}",
+        failures
+    );
+    Ok(())
+}
+
 // The deadline is checked against the block time.
 #[tokio::test]
 async fn test_swap_rejects_an_expired_quote() -> Result<()> {
