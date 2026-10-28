@@ -17,4 +17,16 @@ ignore = [
     # The fix (0.103.16) needs rustls 0.23.46, blocked by the same pin. webpki-roots is already on the
     # fixed 1.0.10. Remove as soon as the pin is gone.
     "RUSTSEC-2026-0382",
+    # crypto-bigint < 0.7.6 (timing variability in constant-time operations). Only reached through
+    # near-sdk's unit-testing feature (near-vm-runner, the mocked chain in unit tests), never
+    # compiled into the contract wasm. The fix is in 0.7, which elliptic-curve 0.13 (via p256, via
+    # near-vm-runner 0.37.4) can't use. Remove once near-sdk moves to a near-vm-runner that can.
+    "RUSTSEC-2026-0387",
+    # zstd < 0.14.3 and zstd-safe < 8.2.0 (stream data leaking across reused contexts, decompression
+    # memory errors). Only reached through near-primitives 0.37.4, a dev-dependency of the sandbox
+    # tests (directly and via near-workspaces), never compiled into the contract wasm. The fixes are
+    # major versions near-primitives 0.37 doesn't accept. Remove once it moves to them.
+    "RUSTSEC-2026-0391",
+    "RUSTSEC-2026-0398",
+    "RUSTSEC-2026-0403",
 ]
