@@ -1,8 +1,10 @@
 use crate::TradingAccountContract;
 use crate::quote::{self, QuoteTerms, SignedQuote};
+use near_sdk::json_types::U128;
 use near_sdk::mock::{MockAction, Receipt};
 use near_sdk::test_utils::{VMContextBuilder, accounts, get_created_receipts};
 use near_sdk::{AccountId, Gas, GasWeight, NearToken, Promise, testing_env};
+use std::collections::BTreeMap;
 
 const PUBLIC_KEY: &str = "ed25519:11111111111111111111111111111111";
 
@@ -994,18 +996,22 @@ fn test_swap_transfers_the_quoted_deposit() {
     }
 }
 
-/// The panic message of a swap of the real quote in `context`.
-fn swap_panic_with(context: VMContextBuilder) -> String {
-    let payload = std::panic::catch_unwind(|| {
-        let mut contract = swap_account_with(context);
-        let _ = swap_with(&mut contract, real_quote());
-    })
-    .unwrap_err();
+/// The message `f` panics with.
+fn panic_message(f: impl FnOnce() + std::panic::UnwindSafe) -> String {
+    let payload = std::panic::catch_unwind(f).unwrap_err();
     payload
         .downcast_ref::<String>()
         .cloned()
         .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
         .unwrap()
+}
+
+/// The panic message of a swap of the real quote in `context`.
+fn swap_panic_with(context: VMContextBuilder) -> String {
+    panic_message(|| {
+        let mut contract = swap_account_with(context);
+        let _ = swap_with(&mut contract, real_quote());
+    })
 }
 
 /// The panic message of a swap by `caller` with `deposit` attached.
@@ -1036,8 +1042,7 @@ fn test_swap_requires_one_yocto() {
     }
 }
 
-// A gas unit below GAS_FOR_SWAP fails. The sandbox test runs a swap at exactly GAS_FOR_SWAP: the
-// mocked chain charges more for swap's own work than the real one.
+// A gas unit below GAS_FOR_SWAP fails.
 #[test]
 fn test_swap_requires_gas_for_swap() {
     let message = swap_panic_with(swap_context(
@@ -1115,4 +1120,184 @@ fn test_swap_callback_fails_when_the_transfer_failed() {
         vec![near_sdk::PromiseResult::Failed],
     );
     contract.swap_callback();
+}
+
+// --- transfer_to_owner: moving tokens to the owner inside intents ---
+
+/// `n` distinct tokens, each with a non-zero amount.
+fn tokens(n: usize) -> BTreeMap<String, U128> {
+    (0..n)
+        .map(|i| (format!("nep141:token{}.near", i), U128(i as u128 + 1)))
+        .collect()
+}
+
+/// A trading account with `agent()` authorized. The next call is made by `caller` with
+/// `deposit` attached and `gas` prepaid.
+fn transfer_account(caller: AccountId, deposit: u128, gas: Gas) -> TradingAccountContract {
+    let contract = trading_account_with_agent();
+    let mut context = get_context(caller);
+    context
+        .attached_deposit(NearToken::from_yoctonear(deposit))
+        .prepaid_gas(gas);
+    testing_env!(context.build());
+    contract
+}
+
+/// The panic message of a transfer of `tokens` by `caller` with `deposit` attached and `gas`
+/// prepaid.
+fn transfer_panic(
+    caller: AccountId,
+    deposit: u128,
+    gas: Gas,
+    tokens: BTreeMap<String, U128>,
+) -> String {
+    panic_message(|| {
+        let mut contract = transfer_account(caller, deposit, gas);
+        let _ = contract.transfer_to_owner(tokens, None);
+    })
+}
+
+// The batch goes to the owner whatever the caller, in the map's sorted order, with the memo and
+// the 1 yocto. mt_batch_transfer gets at least its minimum for the token count plus all the
+// unused gas; the callback gets a fixed amount.
+#[test]
+fn test_transfer_to_owner_sends_one_batch_to_the_owner() {
+    for (caller, memo) in [(agent(), Some("rebalance".to_string())), (owner(), None)] {
+        let mut contract = transfer_account(caller.clone(), 1, Gas::from_tgas(150));
+        let tokens = BTreeMap::from([
+            ("nep141:wrap.near".to_string(), U128(5)),
+            ("nep141:usdt.tether-token.near".to_string(), U128(7)),
+            ("nep245:v2_1.omni.hot.tg:1100_111".to_string(), U128(9)),
+        ]);
+        let receipts = receipts_of(contract.transfer_to_owner(tokens, memo.clone()));
+
+        assert_eq!(receipts.len(), 2, "{}", caller);
+        assert_eq!(receipts[0].receiver_id.as_str(), "intents.near");
+        let [
+            MockAction::FunctionCallWeight {
+                method_name,
+                args,
+                attached_deposit,
+                prepaid_gas,
+                gas_weight,
+                ..
+            },
+        ] = &receipts[0].actions[..]
+        else {
+            panic!("unexpected actions: {:?}", receipts[0].actions);
+        };
+        assert_eq!(method_name, b"mt_batch_transfer");
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(args).unwrap(),
+            serde_json::json!({
+                "receiver_id": owner(),
+                "token_ids": [
+                    "nep141:usdt.tether-token.near",
+                    "nep141:wrap.near",
+                    "nep245:v2_1.omni.hot.tg:1100_111",
+                ],
+                "amounts": ["7", "5", "9"],
+                "memo": memo,
+            })
+        );
+        assert_eq!(*attached_deposit, NearToken::from_yoctonear(1));
+        assert_eq!(*prepaid_gas, crate::mt_batch_transfer_min_gas(3));
+        assert_eq!(gas_weight.0, GasWeight(1).0);
+
+        assert_eq!(receipts[1].receiver_id, near_sdk::env::current_account_id());
+        let [
+            MockAction::FunctionCallWeight {
+                method_name,
+                prepaid_gas,
+                gas_weight,
+                ..
+            },
+        ] = &receipts[1].actions[..]
+        else {
+            panic!("unexpected actions: {:?}", receipts[1].actions);
+        };
+        assert_eq!(method_name, b"transfer_to_owner_callback");
+        assert_eq!(*prepaid_gas, crate::CALLBACK_GAS);
+        assert_eq!(gas_weight.0, 0);
+    }
+}
+
+#[test]
+fn test_transfer_to_owner_rejects_a_stranger() {
+    let message = transfer_panic(stranger(), 1, Gas::from_tgas(150), tokens(1));
+    assert!(
+        message.contains("Unauthorized: only the owner or an agent can transfer to the owner"),
+        "{}",
+        message
+    );
+}
+
+#[test]
+fn test_transfer_to_owner_requires_one_yocto() {
+    for deposit in [0, 2] {
+        let message = transfer_panic(agent(), deposit, Gas::from_tgas(150), tokens(1));
+        assert!(
+            message.contains("Requires attached deposit of exactly 1 yoctoNEAR"),
+            "deposit {}: {}",
+            deposit,
+            message
+        );
+    }
+}
+
+// At most 10 tokens, the most the gas was measured for, and an empty batch moves nothing.
+#[test]
+fn test_transfer_to_owner_rejects_0_or_more_than_10_tokens() {
+    for n in [0, 11] {
+        let message = transfer_panic(agent(), 1, Gas::from_tgas(150), tokens(n));
+        assert!(
+            message.contains("tokens must have 1 to 10 entries"),
+            "{} tokens: {}",
+            n,
+            message
+        );
+    }
+}
+
+#[test]
+fn test_transfer_to_owner_rejects_a_zero_amount() {
+    let mut tokens = tokens(2);
+    tokens.insert("nep141:wrap.near".to_string(), U128(0));
+    let message = transfer_panic(agent(), 1, Gas::from_tgas(150), tokens);
+    assert!(
+        message.contains("Amount of nep141:wrap.near must be above 0"),
+        "{}",
+        message
+    );
+}
+
+// The gas needed grows with the token count: 38 Tgas for 10 tokens.
+#[test]
+fn test_transfer_to_owner_requires_its_gas() {
+    let needed = crate::gas_for_transfer_to_owner(10);
+    let message = transfer_panic(
+        agent(),
+        1,
+        needed.saturating_sub(Gas::from_gas(1)),
+        tokens(10),
+    );
+    assert!(
+        message.contains("Not enough gas attached. Please attach at least 38 TGas"),
+        "{}",
+        message
+    );
+}
+
+#[test]
+#[should_panic(expected = "transfer_to_owner: mt_batch_transfer on intents.near failed")]
+fn test_transfer_to_owner_callback_fails_when_the_transfer_failed() {
+    let contract = trading_account_with_agent();
+    testing_env!(
+        get_context(accounts(0)).build(),
+        near_sdk::test_vm_config(),
+        near_sdk::RuntimeFeesConfig::test(),
+        Default::default(),
+        vec![near_sdk::PromiseResult::Failed],
+    );
+    contract.transfer_to_owner_callback();
 }
