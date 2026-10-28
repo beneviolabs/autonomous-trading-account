@@ -1,17 +1,12 @@
-use crate::{ActionString, TradingAccountContract, test_support};
-use near_sdk::json_types::{Base58CryptoHash, U64};
+use crate::TradingAccountContract;
+use crate::quote::{self, QuoteTerms, SignedQuote};
+use near_sdk::json_types::U128;
 use near_sdk::mock::{MockAction, Receipt};
 use near_sdk::test_utils::{VMContextBuilder, accounts, get_created_receipts};
-use near_sdk::{AccountId, Gas, NearToken, Promise, testing_env};
-use omni_transaction::TxBuilder;
-use omni_transaction::near::NearTransaction;
-use omni_transaction::near::types::Action as OmniAction;
-use omni_transaction::near::utils::PublicKeyStrExt;
+use near_sdk::{AccountId, Gas, GasWeight, NearToken, Promise, testing_env};
+use std::collections::BTreeMap;
 
 const PUBLIC_KEY: &str = "ed25519:11111111111111111111111111111111";
-
-/// One `mt_transfer` on `intents.near`, the only call the allowlist permits.
-const MT_TRANSFER: &str = r#"[{"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"alice.near","token_id":"nep141:wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"}]"#;
 
 fn owner() -> AccountId {
     accounts(1)
@@ -31,15 +26,11 @@ fn user(i: usize) -> AccountId {
     format!("user{}.testnet", i).parse().unwrap()
 }
 
-/// The block height the mocked chain is at.
-const BLOCK_HEIGHT: u64 = 100;
-
 fn get_context(predecessor: AccountId) -> VMContextBuilder {
     let mut builder = VMContextBuilder::new();
     builder
         .predecessor_account_id(predecessor)
-        .prepaid_gas(Gas::from_tgas(150))
-        .block_height(BLOCK_HEIGHT);
+        .prepaid_gas(Gas::from_tgas(150));
     builder
 }
 
@@ -51,7 +42,7 @@ fn call_as(caller: AccountId) {
 /// A new trading account owned by `owner()`, who is also the current caller.
 fn trading_account() -> TradingAccountContract {
     call_as(owner());
-    TradingAccountContract::new(owner(), "v1.signer".parse().unwrap())
+    TradingAccountContract::new(owner())
 }
 
 /// A trading account with `agent()` authorized.
@@ -61,40 +52,6 @@ fn trading_account_with_agent() -> TradingAccountContract {
     contract
 }
 
-/// Calls request_signature as `caller`. The tests only vary the receiver and the actions.
-fn request_signature(
-    contract: &mut TradingAccountContract,
-    caller: AccountId,
-    contract_id: &str,
-    actions_json: &str,
-) -> Promise {
-    request_signature_with_nonce(contract, caller, contract_id, actions_json, 1)
-}
-
-fn request_signature_with_nonce(
-    contract: &mut TradingAccountContract,
-    caller: AccountId,
-    contract_id: &str,
-    actions_json: &str,
-    nonce: u64,
-) -> Promise {
-    call_as(caller);
-    contract.request_signature(
-        contract_id.parse().unwrap(),
-        actions_json.to_string(),
-        U64(nonce),
-        Base58CryptoHash::from([0u8; 32]),
-        test_support::mpc_public_key(),
-        "trading-account.near".to_string(),
-    )
-}
-
-/// validate_and_build_actions for `actions_json` sent to `contract_id`.
-fn build_actions(contract_id: &str, actions_json: &str) -> Result<Vec<OmniAction>, String> {
-    let actions: Vec<ActionString> = serde_json::from_str(actions_json).unwrap();
-    trading_account().validate_and_build_actions(actions, &contract_id.parse().unwrap())
-}
-
 /// The receipts `promise` schedules. A promise is only scheduled when it's dropped.
 fn receipts_of(promise: Promise) -> Vec<Receipt> {
     drop(promise);
@@ -102,10 +59,9 @@ fn receipts_of(promise: Promise) -> Vec<Receipt> {
 }
 
 #[test]
-fn test_new_sets_owner_and_signer() {
+fn test_new_sets_owner() {
     let contract = trading_account();
     assert_eq!(contract.get_owner_id(), owner());
-    assert_eq!(contract.get_signer_id().as_str(), "v1.signer");
     assert!(contract.get_agents().is_empty());
 }
 
@@ -170,31 +126,6 @@ fn test_remove_agent_frees_a_slot() {
     contract.add_agent(user(11));
     assert_eq!(contract.get_agents().len(), 10);
     assert!(contract.is_agent(user(11)));
-}
-
-#[test]
-fn test_set_signer_id_by_owner() {
-    let mut contract = trading_account();
-    contract.set_signer_id("new-signer.near".parse().unwrap());
-    assert_eq!(contract.get_signer_id().as_str(), "new-signer.near");
-}
-
-// The signer decides what gets signed, so only the owner can change it. A bot that could repoint
-// it could have anything signed (pen test finding #7).
-#[test]
-#[should_panic(expected = "You have no power here. Only the owner can perform this action.")]
-fn test_set_signer_id_rejects_agent() {
-    let mut contract = trading_account_with_agent();
-    call_as(agent());
-    contract.set_signer_id("new-signer.near".parse().unwrap());
-}
-
-#[test]
-#[should_panic(expected = "You have no power here. Only the owner can perform this action.")]
-fn test_set_signer_id_rejects_unauthorized_caller() {
-    let mut contract = trading_account();
-    call_as(stranger());
-    contract.set_signer_id("new-signer.near".parse().unwrap());
 }
 
 #[test]
@@ -302,8 +233,6 @@ fn test_delete_key_by_owner() {
     );
 }
 
-// Deleting the MPC key is the only way to invalidate transactions the bot already had signed
-// (pen test findings #5 and #6), and only the owner may do it.
 #[test]
 #[should_panic(expected = "You have no power here. Only the owner can perform this action.")]
 fn test_delete_key_rejects_agent() {
@@ -331,519 +260,6 @@ fn test_delete_key_rejects_no_deposit() {
 fn test_delete_key_rejects_more_than_one_yocto() {
     let mut contract = trading_account();
     let _ = delete_key_as(&mut contract, owner(), 2);
-}
-
-#[test]
-#[should_panic(expected = "Unauthorized: only agents can request signatures")]
-fn test_request_signature_rejects_unauthorized_caller() {
-    let mut contract = trading_account();
-    let _ = request_signature(&mut contract, stranger(), "intents.near", MT_TRANSFER);
-}
-
-// Only agents (the bot) can request signatures, not the owner. That's deliberate: the
-// owner has no use for signing through the trading account, so it doesn't get the capability.
-#[test]
-#[should_panic(expected = "Unauthorized: only agents can request signatures")]
-fn test_request_signature_rejects_owner() {
-    let mut contract = trading_account_with_agent();
-    let _ = request_signature(
-        &mut contract,
-        owner(),
-        "intents.near",
-        r#"[{"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"alice.near","token_id":"nep141:wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"}]"#,
-    );
-}
-
-#[test]
-#[should_panic(expected = "unknown variant `Sign Message`, expected `FunctionCall`")]
-fn test_request_signature_rejects_unknown_action_type() {
-    let mut contract = trading_account_with_agent();
-    let _ = request_signature(
-        &mut contract,
-        agent(),
-        "intents.near",
-        r#"[{"type":"Sign Message","Message":"blah blah blah"}]"#,
-    );
-}
-
-#[test]
-#[should_panic(expected = "ft_withdraw on intents.near is not allowed")]
-fn test_request_signature_rejects_disallowed_call() {
-    let mut contract = trading_account_with_agent();
-    let _ = request_signature(
-        &mut contract,
-        agent(),
-        "intents.near",
-        r#"[{"type":"FunctionCall","method_name":"ft_withdraw","args":{"receiver_id":"alice.near","token":"wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"}]"#,
-    );
-}
-
-// A bare Transfer sends NEAR straight out of the trading account. The bot never needs one, so
-// it's rejected even next to an allowed call (pen test finding #2).
-#[test]
-#[should_panic(expected = "unknown variant `Transfer`, expected `FunctionCall`")]
-fn test_request_signature_rejects_transfer() {
-    let mut contract = trading_account_with_agent();
-    let _ = request_signature(
-        &mut contract,
-        agent(),
-        "intents.near",
-        r#"[
-            {"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"alice.near","token_id":"nep141:wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"},
-            {"type":"Transfer","deposit":"1000000000000000000000000"}
-        ]"#,
-    );
-}
-
-// Validation passes, so the call gets as far as scheduling the MPC signer call. The mocked chain
-// reports GasExceeded there (with 100 to 300 Tgas attached), so that panic is the pass condition:
-// a validation failure would panic earlier with its own message. test_request_signature_with_stub_signer
-// runs a whole call in the sandbox.
-#[test]
-#[should_panic(expected = "GasExceeded")]
-fn test_request_signature_accepts_mt_transfer() {
-    let mut contract = trading_account_with_agent();
-    let _ = request_signature(&mut contract, agent(), "intents.near", MT_TRANSFER);
-}
-
-// NEAR only accepts a nonce below the block height × 1,000,000, and a re-added key starts at
-// (its block height - 1) × 1,000,000. A higher nonce would make a transaction that becomes valid
-// later, and could outlive delete_key + add_full_access_key. Signing only nonces below the
-// current block height × 1,000,000 keeps every signed transaction below a re-added key's nonce.
-#[test]
-#[should_panic(expected = "Invalid nonce")]
-fn test_request_signature_rejects_nonce_from_a_future_block() {
-    let mut contract = trading_account_with_agent();
-    let _ = request_signature_with_nonce(
-        &mut contract,
-        agent(),
-        "intents.near",
-        MT_TRANSFER,
-        BLOCK_HEIGHT * 1_000_000,
-    );
-}
-
-// The highest nonce that's valid now passes the check, and fails later on the mocked chain's
-// GasExceeded, as in test_request_signature_accepts_mt_transfer.
-#[test]
-#[should_panic(expected = "GasExceeded")]
-fn test_request_signature_accepts_highest_valid_nonce() {
-    let mut contract = trading_account_with_agent();
-    let _ = request_signature_with_nonce(
-        &mut contract,
-        agent(),
-        "intents.near",
-        MT_TRANSFER,
-        BLOCK_HEIGHT * 1_000_000 - 1,
-    );
-}
-
-// FunctionCall is the only action type, and the allowlist only checks FunctionCalls, so every
-// other action type must fail to parse. If one were added, serde would list it after
-// `FunctionCall` and this would fail.
-#[test]
-fn test_action_string_accepts_only_function_call() {
-    for action_type in [
-        "Transfer",
-        "AddKey",
-        "DeleteKey",
-        "DeleteAccount",
-        "DeployContract",
-        "Stake",
-        "CreateAccount",
-        "functioncall",
-    ] {
-        let error = serde_json::from_str::<Vec<ActionString>>(&format!(
-            r#"[{{"type":"{}"}}]"#,
-            action_type
-        ))
-        .unwrap_err()
-        .to_string();
-        assert!(
-            error.contains(&format!(
-                "unknown variant `{}`, expected `FunctionCall` at",
-                action_type
-            )),
-            "{}",
-            error
-        );
-    }
-}
-
-#[test]
-fn test_validate_and_build_actions_builds_mt_transfer() {
-    let actions = build_actions("intents.near", MT_TRANSFER).unwrap();
-
-    let [OmniAction::FunctionCall(call)] = &actions[..] else {
-        panic!("unexpected actions: {:?}", actions);
-    };
-    assert_eq!(call.method_name, "mt_transfer");
-    assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&call.args).unwrap(),
-        serde_json::json!({"receiver_id": "alice.near", "token_id": "nep141:wrap.near", "amount": "1000"})
-    );
-    assert_eq!(call.gas, Gas::from_tgas(30));
-    assert_eq!(call.deposit, NearToken::from_yoctonear(1));
-}
-
-// The bot only ever signs intents.near::mt_transfer (pen test finding #2). Everything
-// the allowlist used to permit is rejected, and so are names one typo or suffix away from it.
-#[test]
-fn test_validate_and_build_actions_rejects_everything_but_mt_transfer_on_intents() {
-    const PREVIOUSLY_ALLOWED_CONTRACTS: [&str; 3] = ["wrap.near", "intents.near", "wrap.testnet"];
-    const PREVIOUSLY_ALLOWED_METHODS: [&str; 6] = [
-        "add_public_key",
-        "ft_transfer_call",
-        "near_deposit",
-        "mt_transfer_call",
-        "mt_transfer",
-        "ft_withdraw",
-    ];
-    let mut calls: Vec<(&str, &str)> = PREVIOUSLY_ALLOWED_CONTRACTS
-        .iter()
-        .flat_map(|contract| {
-            PREVIOUSLY_ALLOWED_METHODS
-                .iter()
-                .map(move |method| (*contract, *method))
-        })
-        .filter(|call| *call != ("intents.near", "mt_transfer"))
-        .collect();
-    assert_eq!(calls.len(), 17);
-    calls.extend([
-        ("attacker.intents.near", "mt_transfer"),
-        ("intents.near.attacker.near", "mt_transfer"),
-        ("xintents.near", "mt_transfer"),
-        ("intents.testnet", "mt_transfer"),
-        ("intents.near", "MT_TRANSFER"),
-        ("intents.near", "mt_transfer "),
-        ("intents.near", "mt-transfer"),
-    ]);
-
-    for (contract, method) in calls {
-        let actions_json = serde_json::json!([{
-            "type": "FunctionCall",
-            "method_name": method,
-            "args": {},
-            "gas": "30000000000000",
-            "deposit": "1",
-        }])
-        .to_string();
-        let error = build_actions(contract, &actions_json).unwrap_err();
-        assert!(
-            error.contains(&format!("{} on {} is not allowed", method, contract)),
-            "{}",
-            error
-        );
-    }
-}
-
-// One disallowed call fails the whole request, not just that action.
-#[test]
-fn test_validate_and_build_actions_rejects_batch_with_one_disallowed_call() {
-    let error = build_actions(
-        "intents.near",
-        r#"[
-            {"type":"FunctionCall","method_name":"mt_transfer","args":{"receiver_id":"alice.near","token_id":"nep141:wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"},
-            {"type":"FunctionCall","method_name":"ft_withdraw","args":{"receiver_id":"alice.near","token":"wrap.near","amount":"1000"},"gas":"30000000000000","deposit":"1"}
-        ]"#,
-    )
-    .unwrap_err();
-    assert!(
-        error.contains("ft_withdraw on intents.near is not allowed"),
-        "{}",
-        error
-    );
-}
-
-#[test]
-fn test_validate_and_build_actions_rejects_invalid_gas() {
-    let error = build_actions(
-        "intents.near",
-        r#"[{"type":"FunctionCall","method_name":"mt_transfer","args":{},"gas":"invalid_gas","deposit":"1"}]"#,
-    )
-    .unwrap_err();
-    assert!(error.contains("Invalid gas format"), "{}", error);
-}
-
-#[test]
-fn test_validate_and_build_actions_rejects_invalid_deposit() {
-    let error = build_actions(
-        "intents.near",
-        r#"[{"type":"FunctionCall","method_name":"mt_transfer","args":{},"gas":"30000000000000","deposit":"invalid_deposit"}]"#,
-    )
-    .unwrap_err();
-    assert!(error.contains("Invalid deposit format"), "{}", error);
-}
-
-#[test]
-fn test_validate_and_build_actions_rejects_empty_actions() {
-    let error = build_actions("intents.near", "[]").unwrap_err();
-    assert!(error.contains("Actions cannot be empty"), "{}", error);
-}
-
-// The payload is sha256 of the transaction's borsh bytes, computed outside the contract.
-const SIGNATURE_REQUEST_PAYLOAD: &str =
-    "9baac0a493bdac2ba1ac8830e178a61c4bed685b2006c66e0ae83adec129aed4";
-
-// The arguments request_signature sends to the MPC signer's `sign`. The domain is always 0
-// (secp256k1): the agent can't choose another one.
-#[test]
-fn test_create_signature_request_always_uses_domain_zero() {
-    let tx = omni_transaction::TransactionBuilder::new::<omni_transaction::NEAR>()
-        .signer_id("test.near".to_string())
-        .signer_public_key(PUBLIC_KEY.to_public_key().unwrap())
-        .nonce(1)
-        .receiver_id("wrap.near".to_string())
-        .block_hash(omni_transaction::near::types::BlockHash([0u8; 32]))
-        .actions(vec![])
-        .build();
-    assert_eq!(
-        trading_account().create_signature_request(&tx, "test.trading-account.near".to_string()),
-        serde_json::json!({ "request": {
-            "payload_v2": { "Ecdsa": SIGNATURE_REQUEST_PAYLOAD },
-            "path": "test.trading-account.near",
-            "domain_id": 0,
-        }})
-    );
-}
-
-// Pins the bytes that get signed and broadcast. request_signature builds the transaction with
-// omni-transaction and passes it to sign_request_callback as JSON, which deserializes it back
-// into the same type. The expected values were produced by the audited version
-// (omni-transaction 0.2, near-sdk 5.17), so a dependency bump that changes the encoding or
-// breaks the JSON round trip fails here. Its actions are built directly: the allowlist no longer
-// permits them, but the encoding they pin is the same for mt_transfer.
-#[test]
-fn test_transaction_bytes_unchanged() {
-    use omni_transaction::near::types::{
-        BlockHash, FunctionCallAction, Secp256K1Signature, Signature, TransferAction,
-    };
-    use omni_transaction::{NEAR, TransactionBuilder};
-
-    let mut context = get_context(accounts(1));
-    context.current_account_id(
-        "implicit_07454f3217b9229ead97798c.auth.peerfolio.near"
-            .parse()
-            .unwrap(),
-    );
-    testing_env!(context.build());
-
-    let omni_actions = vec![
-        OmniAction::FunctionCall(Box::new(FunctionCallAction {
-            method_name: "near_deposit".to_string(),
-            args: br#"{"a":[1,2,"x"]}"#.to_vec(),
-            gas: Gas::from_tgas(30),
-            deposit: NearToken::from_yoctonear(123456789012345678901234567),
-        })),
-        OmniAction::FunctionCall(Box::new(FunctionCallAction {
-            method_name: "ft_transfer_call".to_string(),
-            args: b"{}".to_vec(),
-            gas: Gas::from_tgas(300),
-            deposit: NearToken::from_yoctonear(1),
-        })),
-        OmniAction::Transfer(TransferAction {
-            deposit: NearToken::from_yoctonear(u128::MAX),
-        }),
-    ];
-    let tx = TransactionBuilder::new::<NEAR>()
-        .signer_id(near_sdk::env::current_account_id().to_string())
-        .signer_public_key(
-            "secp256k1:3tFRbMqmoa6AAALMrEFAYCEoHcqKxeW38YptwowBVBtXK1vo36HDbUWuR6EZmoK4JcH6HDkNMGGqP1ouV7VZUWya"
-                .to_public_key()
-                .unwrap(),
-        )
-        .nonce(42)
-        .receiver_id("wrap.near".to_string())
-        .block_hash(BlockHash([7u8; 32]))
-        .actions(omni_actions)
-        .build();
-
-    let expected_for_signing = "35000000696d706c696369745f3037343534663332313762393232396561643937373938632e617574682e70656572666f6c696f2e6e65617201903a9a9933ed92bdda3fcf30ac999060a5a0fa51c2b6c74838d3029a5aadefe038f7e4a91714f42bb5a2459a0d294be0cd047b4a999d6fd912702470f843271d2a0000000000000009000000777261702e6e656172070707070707070707070707070707070707070707070707070707070707070703000000020c0000006e6561725f6465706f7369740f0000007b2261223a5b312c322c2278225d7d00e057eb481b0000874b9f2ca8f258f1fd1e660000000000021000000066745f7472616e736665725f63616c6c020000007b7d00c06e31d91001000100000000000000000000000000000003ffffffffffffffffffffffffffffffff";
-    assert_eq!(hex::encode(tx.build_for_signing()), expected_for_signing);
-
-    // Same round trip as request_signature -> sign_request_callback. The JSON is pinned too: a
-    // callback scheduled before an upgrade is deserialized by the new code, so changing this
-    // JSON breaks requests in flight during the upgrade.
-    let tx_json = serde_json::to_string(&tx).unwrap();
-    assert_eq!(
-        tx_json,
-        r#"{"signer_id":"implicit_07454f3217b9229ead97798c.auth.peerfolio.near","public_key":"secp256k1:3tFRbMqmoa6AAALMrEFAYCEoHcqKxeW38YptwowBVBtXK1vo36HDbUWuR6EZmoK4JcH6HDkNMGGqP1ouV7VZUWya","nonce":42,"receiver_id":"wrap.near","block_hash":"US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx","actions":[{"FunctionCall":{"method_name":"near_deposit","args":"eyJhIjpbMSwyLCJ4Il19","gas":"30000000000000","deposit":"123456789012345678901234567"}},{"FunctionCall":{"method_name":"ft_transfer_call","args":"e30=","gas":"300000000000000","deposit":"1"}},{"Transfer":{"deposit":"340282366920938463463374607431768211455"}}]}"#
-    );
-    let near_tx: NearTransaction = serde_json::from_str(&tx_json).unwrap();
-    assert_eq!(
-        hex::encode(near_tx.build_for_signing()),
-        expected_for_signing
-    );
-
-    let mut signature = [0u8; 65];
-    for (i, byte) in signature.iter_mut().enumerate() {
-        *byte = i as u8;
-    }
-    assert_eq!(
-        hex::encode(
-            near_tx.build_with_signature(Signature::SECP256K1(Secp256K1Signature(signature)))
-        ),
-        "35000000696d706c696369745f3037343534663332313762393232396561643937373938632e617574682e70656572666f6c696f2e6e65617201903a9a9933ed92bdda3fcf30ac999060a5a0fa51c2b6c74838d3029a5aadefe038f7e4a91714f42bb5a2459a0d294be0cd047b4a999d6fd912702470f843271d2a0000000000000009000000777261702e6e656172070707070707070707070707070707070707070707070707070707070707070703000000020c0000006e6561725f6465706f7369740f0000007b2261223a5b312c322c2278225d7d00e057eb481b0000874b9f2ca8f258f1fd1e660000000000021000000066745f7472616e736665725f63616c6c020000007b7d00c06e31d91001000100000000000000000000000000000003ffffffffffffffffffffffffffffffff01000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f40"
-    );
-}
-
-// sign_request_callback with a response shaped like v1.signer's: it must parse the response,
-// rebuild the transaction from request_signature's JSON and attach the signature.
-fn callback_setup() -> (TradingAccountContract, NearTransaction, String) {
-    callback_setup_with("intents.near", MT_TRANSFER)
-}
-
-/// A trading account, the transaction request_signature builds for `actions_json` sent to
-/// `receiver`, and the JSON it passes to sign_request_callback.
-fn callback_setup_with(
-    receiver: &str,
-    actions_json: &str,
-) -> (TradingAccountContract, NearTransaction, String) {
-    let mut context = get_context(accounts(1));
-    context.current_account_id(
-        "implicit_07454f3217b9229ead97798c.auth.peerfolio.near"
-            .parse()
-            .unwrap(),
-    );
-    testing_env!(context.build());
-    let contract = TradingAccountContract::new(accounts(1), "v1.signer".parse().unwrap());
-    let (tx, tx_json) = test_support::unsigned_tx(&contract, receiver, actions_json, 7, [9u8; 32]);
-    (contract, tx, tx_json)
-}
-
-/// Decodes sign_request_callback's base64 result.
-fn decode_signed(signed_base64: String) -> Vec<u8> {
-    near_sdk::base64::Engine::decode(
-        &near_sdk::base64::engine::general_purpose::STANDARD,
-        signed_base64,
-    )
-    .unwrap()
-}
-
-#[test]
-fn test_sign_request_callback_attaches_mpc_signature() {
-    let (mut contract, tx, tx_json) = callback_setup();
-    let (response, expected_signed) = crate::test_support::mpc_sign(&tx);
-
-    let signed = decode_signed(contract.sign_request_callback(Ok(response), tx_json));
-    assert_eq!(signed, expected_signed);
-}
-
-/// A secp256k1 secret key other than the test MPC key.
-const OTHER_SECRET_KEY: [u8; 32] = [0x43; 32];
-
-// The callback only returns a transaction whose signature recovers to the transaction's own public
-// key, over that transaction's hash (pen test finding #7). Anything else would be
-// rejected at broadcast at best, so it's rejected here.
-#[test]
-#[should_panic(
-    expected = "Invalid signature: recovered key doesn't match the transaction's public key"
-)]
-fn test_sign_request_callback_rejects_signature_from_another_key() {
-    let (mut contract, tx, tx_json) = callback_setup();
-    let (response, _) = test_support::mpc_sign_with(&tx, OTHER_SECRET_KEY);
-    contract.sign_request_callback(Ok(response), tx_json);
-}
-
-#[test]
-#[should_panic(
-    expected = "Invalid signature: recovered key doesn't match the transaction's public key"
-)]
-fn test_sign_request_callback_rejects_signature_over_another_transaction() {
-    let (mut contract, tx, tx_json) = callback_setup();
-    let mut other_tx = tx.clone();
-    other_tx.nonce = omni_transaction::near::types::U64(tx.nonce.0 + 1);
-    let (response, _) = test_support::mpc_sign(&other_tx);
-    contract.sign_request_callback(Ok(response), tx_json);
-}
-
-#[test]
-#[should_panic(
-    expected = "Invalid signature: recovered key doesn't match the transaction's public key"
-)]
-fn test_sign_request_callback_rejects_flipped_recovery_id() {
-    let (mut contract, tx, tx_json) = callback_setup();
-    let (mut response, _) = test_support::mpc_sign(&tx);
-    response.recovery_id ^= 1;
-    contract.sign_request_callback(Ok(response), tx_json);
-}
-
-// request_signature accepts an ed25519 `mpc_signer_pk`, but the MPC signs with secp256k1, so such a
-// transaction can never carry a valid signature. Signed with the test MPC key, recovery succeeds,
-// and only the key check rejects it.
-#[test]
-#[should_panic(
-    expected = "Invalid signature: recovered key doesn't match the transaction's public key"
-)]
-fn test_sign_request_callback_rejects_ed25519_transaction_key() {
-    let (mut contract, mut tx, _) = callback_setup();
-    tx.signer_public_key = PUBLIC_KEY.to_public_key().unwrap();
-    let tx_json = serde_json::to_string(&tx).unwrap();
-    let (response, _) = test_support::mpc_sign(&tx);
-    contract.sign_request_callback(Ok(response), tx_json);
-}
-
-#[test]
-#[should_panic(expected = "Invalid hex in r")]
-fn test_sign_request_callback_rejects_malformed_big_r() {
-    let (mut contract, tx, tx_json) = callback_setup();
-    let (mut response, _) = test_support::mpc_sign(&tx);
-    response.big_r.affine_point = "02not hex".to_string();
-    contract.sign_request_callback(Ok(response), tx_json);
-}
-
-// Pen test finding #8: request_signature used to rewrite each deposit in the
-// callback JSON with a plain string replace, so a deposit whose digits start another's (1 and
-// 10, 5 and 500) could corrupt the JSON or change a deposit. Every deposit must reach the
-// signed transaction exactly as requested, including 0 and u128::MAX.
-#[test]
-fn test_sign_request_callback_keeps_every_deposit() {
-    let cases: [&[u128]; 6] = [
-        &[1, 10],
-        &[10, 1],
-        &[5, 500, 50],
-        &[1, 1],
-        &[0],
-        &[u128::MAX],
-    ];
-    for deposits in cases {
-        let actions_json = serde_json::to_string(
-            &deposits
-                .iter()
-                .map(|deposit| {
-                    serde_json::json!({
-                        "type": "FunctionCall",
-                        "method_name": "mt_transfer",
-                        "args": {"receiver_id": "alice.near", "token_id": "nep141:wrap.near", "amount": "1000"},
-                        "gas": "30000000000000",
-                        "deposit": deposit.to_string(),
-                    })
-                })
-                .collect::<Vec<_>>(),
-        )
-        .unwrap();
-        let (mut contract, tx, tx_json) = callback_setup_with("intents.near", &actions_json);
-        let built: Vec<u128> = tx
-            .actions
-            .iter()
-            .map(|action| match action {
-                OmniAction::FunctionCall(call) => call.deposit.as_yoctonear(),
-                other => panic!("unexpected action: {:?}", other),
-            })
-            .collect();
-        assert_eq!(built, deposits, "built transaction");
-
-        let (response, expected_signed) = test_support::mpc_sign(&tx);
-        let signed = decode_signed(contract.sign_request_callback(Ok(response), tx_json));
-        assert_eq!(signed, expected_signed, "deposits {:?}", deposits);
-    }
-}
-
-#[test]
-#[should_panic(expected = "Failed to parse the MPC's Signature response")]
-fn test_sign_request_callback_rejects_signer_failure() {
-    let (mut contract, _, tx_json) = callback_setup();
-    contract.sign_request_callback(Err(near_sdk::PromiseError::Failed), tx_json);
 }
 
 // ---- Versioned state and migrate ----
@@ -888,7 +304,7 @@ fn write_v0_state(agents: usize) -> Vec<u8> {
 /// Writes current-version state with `agents` agents. Returns the STATE bytes.
 fn write_current_state(agents: usize) -> Vec<u8> {
     call_as(implicit_owner());
-    let mut contract = TradingAccountContract::new(implicit_owner(), "v1.signer".parse().unwrap());
+    let mut contract = TradingAccountContract::new(implicit_owner());
     for i in 0..agents {
         contract.add_agent(user(i));
     }
@@ -945,7 +361,7 @@ fn test_contract_version() {
 fn test_state_bytes_match_the_snapshot() {
     assert_eq!(crate::STATE_VERSION, 1, "snapshot the new state version");
     call_as(implicit_owner());
-    let mut contract = TradingAccountContract::new(implicit_owner(), "v1.signer".parse().unwrap());
+    let mut contract = TradingAccountContract::new(implicit_owner());
     contract.add_agent(user(0));
     contract.add_agent(user(1));
     assert_eq!(
@@ -955,18 +371,19 @@ fn test_state_bytes_match_the_snapshot() {
 }
 
 #[test]
-fn test_migrate_v0_keeps_owner_signer_and_agents() {
+fn test_migrate_v0_keeps_owner_and_agents_and_drops_signer() {
     let raw = write_v0_state(10);
     let mut contract = TradingAccountContract::migrate();
 
     assert_eq!(contract.get_owner_id(), implicit_owner());
-    assert_eq!(contract.get_signer_id().as_str(), "v1.signer");
     assert_eq!(contract.get_agents(), (0..10).map(user).collect::<Vec<_>>());
     assert!(contract.is_agent(user(9)));
-    // The set is moved, not rebuilt: the new state is the version byte, then v0's bytes unchanged.
+    // The set is moved, not rebuilt: the new state is the version byte, then v0's bytes up to
+    // signer_id (a 4-byte length and the name), which is dropped.
+    let signer_len = 4 + "v1.signer".len();
     let migrated = state_bytes(&contract);
     assert_eq!(migrated[0], crate::STATE_VERSION);
-    assert_eq!(&migrated[1..], &raw[..]);
+    assert_eq!(&migrated[1..], &raw[..raw.len() - signer_len]);
     // The owner still manages the migrated set.
     call_as(implicit_owner());
     contract.remove_agent(user(0));
@@ -1172,4 +589,715 @@ fn test_do_upgrade_rejects_a_hash_the_factory_does_not_point_to() {
 #[should_panic(expected = "invalid code hash")]
 fn test_do_upgrade_rejects_an_invalid_hash() {
     let _ = do_upgrade("not-a-hash", "not-a-hash");
+}
+
+// --- Quotes: 1Click's signature and the terms swap accepts ---
+
+/// The trading account in these tests: the mocked chain's current account.
+fn trading_account_id() -> AccountId {
+    // VMContextBuilder's default, not accounts(0), which is "alice".
+    "alice.near".parse().unwrap()
+}
+
+/// The accounts a quote may pay out and refund to.
+fn ours() -> [AccountId; 2] {
+    [trading_account_id(), owner()]
+}
+
+const DEPOSIT_ADDRESS: &str = "101823db08284897878219787860f301b04e4e8e51689387b1c395fb73e99ef5";
+
+/// Signs quotes in place of 1Click.
+fn test_quote_key() -> near_crypto::SecretKey {
+    near_crypto::SecretKey::from_seed(near_crypto::KeyType::ED25519, "1click")
+}
+
+fn test_quote_keys() -> [[u8; 32]; 1] {
+    [test_quote_key().public_key().key_data().try_into().unwrap()]
+}
+
+/// A live quote's signed payload, paying out and refunding to the trading account. `changes`
+/// overrides fields; a null removes one. serde_json sorts keys, as 1Click's SDK does.
+fn quote_payload(changes: serde_json::Value) -> String {
+    let mut payload = serde_json::json!({
+        "amount": "20000000000000000000000",
+        "amountIn": "20000000000000000000000",
+        "amountOut": "98641",
+        "deadline": "2026-10-25T16:21:59.865Z",
+        "depositAddress": DEPOSIT_ADDRESS,
+        "depositType": "INTENTS",
+        "destinationAsset": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+        "dry": false,
+        "minAmountOut": "97654",
+        "originAsset": "nep141:wrap.near",
+        "recipient": "alice.near",
+        "recipientType": "INTENTS",
+        "refundTo": "alice.near",
+        "refundType": "INTENTS",
+        "slippageTolerance": 100,
+        "swapType": "EXACT_INPUT",
+        "timestamp": "2026-10-22T16:07:00.045Z",
+    });
+    for (key, value) in changes.as_object().unwrap() {
+        if value.is_null() {
+            payload.as_object_mut().unwrap().remove(key);
+        } else {
+            payload[key] = value.clone();
+        }
+    }
+    payload.to_string()
+}
+
+/// `payload` signed the way 1Click signs: the base58 text of its SHA-256.
+fn sign_quote(payload: &str) -> SignedQuote {
+    let message =
+        near_sdk::bs58::encode(crate::utils::hash_payload(payload.as_bytes())).into_string();
+    SignedQuote {
+        payload: payload.to_string(),
+        signature: test_quote_key().sign(message.as_bytes()).to_string(),
+    }
+}
+
+/// The checked terms of a test-signed quote.
+fn quote_terms(changes: serde_json::Value) -> QuoteTerms {
+    quote::verify(&sign_quote(&quote_payload(changes)), &test_quote_keys()).unwrap()
+}
+
+/// The test quote's `deadline` in Unix milliseconds: 2026-10-25T16:21:59.865Z.
+const QUOTE_DEADLINE_MS: u64 = 1_792_945_319_865;
+
+/// QuoteTerms::check for a test-signed quote with `changes`, a millisecond before its deadline.
+fn check(changes: serde_json::Value) -> Result<(), String> {
+    quote_terms(changes).check(&ours(), QUOTE_DEADLINE_MS - 1)
+}
+
+/// The real quote's recipient and refundTo.
+const REAL_QUOTE_ACCOUNT: &str = "implicit_2dde80947980ec0aa6242405.auth.peerfolio.near";
+
+/// A live quote 1Click returned on 2026-10-22: its signature, and the payload Peerfolio Backend's
+/// build_signed_payload flattens it to. It proves the contract hashes and verifies exactly as
+/// 1Click's SDK does, with the compiled-in key.
+fn real_quote() -> SignedQuote {
+    serde_json::from_str(include_str!("../res/one_click_quote.json")).unwrap()
+}
+
+#[test]
+fn test_manager_key_is_the_one_in_1clicks_sdk() {
+    let sdk_key = near_sdk::bs58::decode("reYaWhvwu8Jzo3WUM3zhn6VrhuMEF4eADL17qtRVifc")
+        .into_vec()
+        .unwrap();
+    assert_eq!(quote::ONE_CLICK_MANAGER_KEYS, [sdk_key.as_slice()]);
+}
+
+// Without ONE_CLICK_TEST_KEY at build time, as in every release build, only 1Click's key is
+// trusted.
+#[test]
+fn test_trusted_keys_are_1clicks_alone() {
+    assert_eq!(
+        option_env!("ONE_CLICK_TEST_KEY"),
+        None,
+        "unit tests run without a test key"
+    );
+    assert_eq!(quote::trusted_keys(), quote::ONE_CLICK_MANAGER_KEYS);
+}
+
+#[test]
+fn test_verify_accepts_a_real_1click_quote() {
+    let terms = quote::verify(&real_quote(), quote::ONE_CLICK_MANAGER_KEYS).unwrap();
+    assert_eq!(terms.recipient, REAL_QUOTE_ACCOUNT);
+    assert_eq!(terms.deposit_address.as_deref(), Some(DEPOSIT_ADDRESS));
+}
+
+#[test]
+fn test_verify_rejects_a_tampered_real_quote() {
+    let mut quote = real_quote();
+    quote.payload = quote.payload.replace(REAL_QUOTE_ACCOUNT, "attacker.near");
+    let error = quote::verify(&quote, quote::ONE_CLICK_MANAGER_KEYS).unwrap_err();
+    assert!(error.contains("not signed by 1Click"), "{}", error);
+}
+
+#[test]
+fn test_verify_rejects_a_malformed_signature() {
+    for signature in [
+        real_quote().signature.trim_start_matches("ed25519:"),
+        "secp256k1:2EgRQHTMiMv7UR6z6Tt89CENpuEfD9DpsAKPUqu5aKKSQt4MXFDL5GRDFrRSmk9QLCvQFrxKNLedvKShHBzE2VJn",
+        "ed25519:0OIl",
+        "ed25519:11111111",
+    ] {
+        let quote = SignedQuote {
+            payload: real_quote().payload,
+            signature: signature.to_string(),
+        };
+        let error = quote::verify(&quote, quote::ONE_CLICK_MANAGER_KEYS).unwrap_err();
+        assert!(
+            error.contains("Invalid quote signature: expected"),
+            "{}",
+            error
+        );
+    }
+}
+
+// A signed payload with two `recipient` keys must not parse, whichever one a parser would keep.
+#[test]
+fn test_verify_rejects_duplicate_keys() {
+    let payload = quote_payload(serde_json::json!({})).replacen(
+        r#""recipient":"alice.near""#,
+        r#""recipient":"alice.near","recipient":"attacker.near""#,
+        1,
+    );
+    let error = quote::verify(&sign_quote(&payload), &test_quote_keys()).unwrap_err();
+    assert!(error.contains("duplicate field `recipient`"), "{}", error);
+}
+
+#[test]
+fn test_check_accepts_a_quote_paying_out_to_the_trading_account() {
+    check(serde_json::json!({})).unwrap();
+}
+
+// A liquidation pays out to the owner while refunds come back to the trading account.
+#[test]
+fn test_check_accepts_the_owner_as_recipient_and_refund() {
+    for field in ["recipient", "refundTo"] {
+        check(serde_json::json!({ field: owner().as_str() })).unwrap();
+    }
+}
+
+#[test]
+fn test_check_accepts_the_maximum_slippage() {
+    check(serde_json::json!({ "slippageTolerance": quote::MAX_SLIPPAGE_BPS })).unwrap();
+}
+
+// Fields 1Click adds later are ignored.
+#[test]
+fn test_check_ignores_unknown_fields() {
+    check(serde_json::json!({ "someNewField": "value" })).unwrap();
+}
+
+// Each quote term that would send funds, or their refund, anywhere but back to the user.
+#[test]
+fn test_check_rejects_quotes_that_pay_out_elsewhere() {
+    let cases = [
+        (serde_json::json!({"dry": true}), "dry quote"),
+        (
+            serde_json::json!({"recipient": "attacker.near"}),
+            "Quote recipient attacker.near",
+        ),
+        (
+            serde_json::json!({"refundTo": "attacker.near"}),
+            "Quote refundTo attacker.near",
+        ),
+        (
+            serde_json::json!({"recipientType": "DESTINATION_CHAIN"}),
+            "recipientType must be INTENTS",
+        ),
+        (
+            serde_json::json!({"refundType": "ORIGIN_CHAIN"}),
+            "refundType must be INTENTS",
+        ),
+        (
+            serde_json::json!({"depositType": "ORIGIN_CHAIN"}),
+            "depositType must be INTENTS",
+        ),
+        (
+            serde_json::json!({"virtualChainRecipient": "0xattacker"}),
+            "virtualChainRecipient is not allowed",
+        ),
+        (
+            serde_json::json!({"virtualChainRefundRecipient": "0xattacker"}),
+            "virtualChainRefundRecipient is not allowed",
+        ),
+        (
+            serde_json::json!({"customRecipientMsg": "{}"}),
+            "customRecipientMsg is not allowed",
+        ),
+        (
+            serde_json::json!({"slippageTolerance": quote::MAX_SLIPPAGE_BPS + 1}),
+            "above the 200 bps maximum",
+        ),
+    ];
+    for (changes, expected) in cases {
+        let error = check(changes).unwrap_err();
+        assert!(error.contains(expected), "{}: {}", expected, error);
+    }
+}
+
+// The deadline must be after the block time: a millisecond before it passes, at it fails.
+#[test]
+fn test_check_rejects_a_quote_at_or_after_its_deadline() {
+    let terms = quote_terms(serde_json::json!({}));
+    terms.check(&ours(), QUOTE_DEADLINE_MS - 1).unwrap();
+    for now_ms in [QUOTE_DEADLINE_MS, QUOTE_DEADLINE_MS + 1, u64::MAX] {
+        assert_eq!(
+            terms.check(&ours(), now_ms),
+            Err("Quote deadline 2026-10-25T16:21:59.865Z has passed".to_string()),
+            "now {}",
+            now_ms
+        );
+    }
+}
+
+// quote_payload removes a field set to null.
+#[test]
+fn test_check_rejects_a_missing_deadline() {
+    assert_eq!(
+        check(serde_json::json!({ "deadline": null })),
+        Err("Quote has no deadline".to_string())
+    );
+}
+
+#[test]
+fn test_check_rejects_a_malformed_deadline() {
+    assert_eq!(
+        check(serde_json::json!({ "deadline": "tomorrow" })),
+        Err("Quote deadline tomorrow is not an ISO 8601 date-time".to_string())
+    );
+}
+
+// Each form names 2026-10-26T10:38:03.537Z, or that minute or second. Checked against Python's
+// datetime.
+#[test]
+fn test_parse_deadline_ms_reads_iso_8601_forms() {
+    let cases = [
+        ("2026-10-26T10:38:03.537Z", 1_793_011_083_537),
+        ("2026-10-26T12:38:03.537+02:00", 1_793_011_083_537),
+        ("2026-10-26T12:38:03.537+0200", 1_793_011_083_537),
+        ("2026-10-26T10:38:03.537123456Z", 1_793_011_083_537),
+        ("2026-10-26 10:38:03.537Z", 1_793_011_083_537),
+        ("2026-10-26t10:38:03.537z", 1_793_011_083_537),
+        ("2026-10-26T10:38:03Z", 1_793_011_083_000),
+        ("2026-10-26T10:38:03.5Z", 1_793_011_083_500),
+        ("2026-10-26T10:38Z", 1_793_011_080_000),
+        ("20261026T103803Z", 1_793_011_083_000),
+        ("2026-W44-1T10:38:03Z", 1_793_011_083_000),
+        ("2026-299T10:38:03Z", 1_793_011_083_000),
+        // No time zone: read as UTC.
+        ("2026-10-26T10:38:03.537", 1_793_011_083_537),
+        ("2026-10-26T10:38", 1_793_011_080_000),
+    ];
+    for (deadline, expected) in cases {
+        assert_eq!(
+            quote::parse_deadline_ms(deadline),
+            Ok(expected),
+            "{}",
+            deadline
+        );
+    }
+}
+
+#[test]
+fn test_parse_deadline_ms_rejects_anything_else() {
+    for deadline in [
+        "2026-10-26",
+        // A zone the parsers reject must not be read as UTC. `time` takes offsets up to 25:59.
+        "2026-10-26T10:38:03+26:00",
+        "2026-13-26T10:38:03Z",
+        "2027-02-29T10:38:03Z",
+        "2026-10-26T10:38:03Zjunk",
+        "",
+        "1793011083537",
+    ] {
+        assert_eq!(
+            quote::parse_deadline_ms(deadline),
+            Err(format!(
+                "Quote deadline {} is not an ISO 8601 date-time",
+                deadline
+            )),
+            "{:?}",
+            deadline
+        );
+    }
+}
+
+// --- swap: depositing into a 1Click quote with a direct call ---
+
+/// The real quote's `timestamp`, when 1Click issued it, in nanoseconds: 2026-10-22T16:07:00.045Z.
+const REAL_QUOTE_ISSUED_NS: u64 = 1_792_685_220_045_000_000;
+
+/// A context on the trading account at the real quote's recipient, at the time 1Click issued the
+/// quote, called by `caller` with `deposit` attached and `gas` prepaid.
+fn swap_context(caller: AccountId, deposit: u128, gas: Gas) -> VMContextBuilder {
+    let mut context = get_context(caller);
+    context
+        .current_account_id(REAL_QUOTE_ACCOUNT.parse().unwrap())
+        .block_timestamp(REAL_QUOTE_ISSUED_NS)
+        .attached_deposit(NearToken::from_yoctonear(deposit))
+        .prepaid_gas(gas);
+    context
+}
+
+/// The trading account at the real quote's recipient, with `agent()` authorized. The next call
+/// is made by `caller` with `deposit` attached.
+fn swap_account(caller: AccountId, deposit: u128) -> TradingAccountContract {
+    swap_account_with(swap_context(caller, deposit, Gas::from_tgas(150)))
+}
+
+fn swap_account_with(context: VMContextBuilder) -> TradingAccountContract {
+    testing_env!(swap_context(owner(), 0, Gas::from_tgas(150)).build());
+    let mut contract = TradingAccountContract::new(owner());
+    contract.add_agent(agent());
+    testing_env!(context.build());
+    contract
+}
+
+fn swap_with(contract: &mut TradingAccountContract, quote: SignedQuote) -> Promise {
+    contract.swap(quote.payload, quote.signature)
+}
+
+// The transfer comes from the quote alone, and intents.near gets the 1 yocto. mt_transfer gets
+// at least its minimum plus all of swap's unused gas; the callback gets a fixed amount.
+#[test]
+fn test_swap_transfers_the_quoted_deposit() {
+    for caller in [agent(), owner()] {
+        let mut contract = swap_account(caller.clone(), 1);
+        let receipts = receipts_of(swap_with(&mut contract, real_quote()));
+
+        assert_eq!(receipts.len(), 2, "{}", caller);
+        assert_eq!(receipts[0].receiver_id.as_str(), "intents.near");
+        let [
+            MockAction::FunctionCallWeight {
+                method_name,
+                args,
+                attached_deposit,
+                prepaid_gas,
+                gas_weight,
+                ..
+            },
+        ] = &receipts[0].actions[..]
+        else {
+            panic!("unexpected actions: {:?}", receipts[0].actions);
+        };
+        assert_eq!(method_name, b"mt_transfer");
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(args).unwrap(),
+            serde_json::json!({
+                "receiver_id": DEPOSIT_ADDRESS,
+                "token_id": "nep141:wrap.near",
+                "amount": "20000000000000000000000",
+            })
+        );
+        assert_eq!(*attached_deposit, NearToken::from_yoctonear(1));
+        assert_eq!(*prepaid_gas, crate::MT_TRANSFER_MIN_GAS);
+        assert_eq!(gas_weight.0, GasWeight(1).0);
+
+        assert_eq!(receipts[1].receiver_id.as_str(), REAL_QUOTE_ACCOUNT);
+        let [
+            MockAction::FunctionCallWeight {
+                method_name,
+                prepaid_gas,
+                gas_weight,
+                ..
+            },
+        ] = &receipts[1].actions[..]
+        else {
+            panic!("unexpected actions: {:?}", receipts[1].actions);
+        };
+        assert_eq!(method_name, b"swap_callback");
+        assert_eq!(*prepaid_gas, crate::CALLBACK_GAS);
+        assert_eq!(gas_weight.0, 0);
+    }
+}
+
+/// The message `f` panics with.
+fn panic_message(f: impl FnOnce() + std::panic::UnwindSafe) -> String {
+    let payload = std::panic::catch_unwind(f).unwrap_err();
+    payload
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+        .unwrap()
+}
+
+/// The panic message of a swap of the real quote in `context`.
+fn swap_panic_with(context: VMContextBuilder) -> String {
+    panic_message(|| {
+        let mut contract = swap_account_with(context);
+        let _ = swap_with(&mut contract, real_quote());
+    })
+}
+
+/// The panic message of a swap by `caller` with `deposit` attached.
+fn swap_panic(caller: AccountId, deposit: u128) -> String {
+    swap_panic_with(swap_context(caller, deposit, Gas::from_tgas(150)))
+}
+
+#[test]
+fn test_swap_rejects_a_stranger() {
+    let message = swap_panic(stranger(), 1);
+    assert!(
+        message.contains("Unauthorized: only the owner or an agent can swap"),
+        "{}",
+        message
+    );
+}
+
+#[test]
+fn test_swap_requires_one_yocto() {
+    for deposit in [0, 2] {
+        let message = swap_panic(agent(), deposit);
+        assert!(
+            message.contains("Requires attached deposit of exactly 1 yoctoNEAR"),
+            "deposit {}: {}",
+            deposit,
+            message
+        );
+    }
+}
+
+// A gas unit below GAS_FOR_SWAP fails.
+#[test]
+fn test_swap_requires_gas_for_swap() {
+    let message = swap_panic_with(swap_context(
+        agent(),
+        1,
+        crate::GAS_FOR_SWAP.saturating_sub(Gas::from_gas(1)),
+    ));
+    assert!(
+        message.contains("Not enough gas attached. Please attach at least 30 TGas"),
+        "{}",
+        message
+    );
+}
+
+#[test]
+#[should_panic(expected = "Invalid quote signature: not signed by 1Click")]
+fn test_swap_rejects_a_tampered_quote() {
+    let mut contract = swap_account(agent(), 1);
+    let mut quote = real_quote();
+    quote.payload = quote
+        .payload
+        .replace("20000000000000000000000", "30000000000000000000000");
+    let _ = swap_with(&mut contract, quote);
+}
+
+// swap verifies against the compiled-in key, so a test-signed quote is refused.
+#[test]
+#[should_panic(expected = "Invalid quote signature: not signed by 1Click")]
+fn test_swap_rejects_a_quote_not_signed_by_1click() {
+    let mut contract = swap_account(agent(), 1);
+    let quote =
+        sign_quote(&quote_payload(serde_json::json!({})).replace("alice.near", REAL_QUOTE_ACCOUNT));
+    let _ = swap_with(&mut contract, quote);
+}
+
+// The same genuine quote, on an account it doesn't pay out to.
+#[test]
+#[should_panic(expected = "is not the trading account or its owner")]
+fn test_swap_rejects_a_quote_paying_another_account() {
+    let mut contract = trading_account_with_agent();
+    testing_env!(
+        get_context(agent())
+            .block_timestamp(REAL_QUOTE_ISSUED_NS)
+            .attached_deposit(NearToken::from_yoctonear(1))
+            .build()
+    );
+    let _ = swap_with(&mut contract, real_quote());
+}
+
+// The real quote's deadline is the block time it stops working at.
+#[test]
+fn test_swap_rejects_an_expired_quote() {
+    let mut context = swap_context(agent(), 1, Gas::from_tgas(150));
+    context.block_timestamp(QUOTE_DEADLINE_MS * 1_000_000);
+    let message = swap_panic_with(context);
+    assert!(
+        message.contains("Quote deadline 2026-10-25T16:21:59.865Z has passed"),
+        "{}",
+        message
+    );
+}
+
+// Quote terms swap rejects (dry, foreign refundTo, slippage over the cap, ...) are covered by
+// test_check_rejects_quotes_that_pay_out_elsewhere: swap runs QuoteTerms::check.
+
+#[test]
+#[should_panic(expected = "swap: mt_transfer on intents.near failed")]
+fn test_swap_callback_fails_when_the_transfer_failed() {
+    let contract = trading_account_with_agent();
+    testing_env!(
+        get_context(accounts(0)).build(),
+        near_sdk::test_vm_config(),
+        near_sdk::RuntimeFeesConfig::test(),
+        Default::default(),
+        vec![near_sdk::PromiseResult::Failed],
+    );
+    contract.swap_callback();
+}
+
+// --- transfer_to_owner: moving tokens to the owner inside intents ---
+
+/// `n` distinct tokens, each with a non-zero amount.
+fn tokens(n: usize) -> BTreeMap<String, U128> {
+    (0..n)
+        .map(|i| (format!("nep141:token{}.near", i), U128(i as u128 + 1)))
+        .collect()
+}
+
+/// A trading account with `agent()` authorized. The next call is made by `caller` with
+/// `deposit` attached and `gas` prepaid.
+fn transfer_account(caller: AccountId, deposit: u128, gas: Gas) -> TradingAccountContract {
+    let contract = trading_account_with_agent();
+    let mut context = get_context(caller);
+    context
+        .attached_deposit(NearToken::from_yoctonear(deposit))
+        .prepaid_gas(gas);
+    testing_env!(context.build());
+    contract
+}
+
+/// The panic message of a transfer of `tokens` by `caller` with `deposit` attached and `gas`
+/// prepaid.
+fn transfer_panic(
+    caller: AccountId,
+    deposit: u128,
+    gas: Gas,
+    tokens: BTreeMap<String, U128>,
+) -> String {
+    panic_message(|| {
+        let mut contract = transfer_account(caller, deposit, gas);
+        let _ = contract.transfer_to_owner(tokens, None);
+    })
+}
+
+// The batch goes to the owner whatever the caller, in the map's sorted order, with the memo and
+// the 1 yocto. mt_batch_transfer gets at least its minimum for the token count plus all the
+// unused gas; the callback gets a fixed amount.
+#[test]
+fn test_transfer_to_owner_sends_one_batch_to_the_owner() {
+    for (caller, memo) in [(agent(), Some("rebalance".to_string())), (owner(), None)] {
+        let mut contract = transfer_account(caller.clone(), 1, Gas::from_tgas(150));
+        let tokens = BTreeMap::from([
+            ("nep141:wrap.near".to_string(), U128(5)),
+            ("nep141:usdt.tether-token.near".to_string(), U128(7)),
+            ("nep245:v2_1.omni.hot.tg:1100_111".to_string(), U128(9)),
+        ]);
+        let receipts = receipts_of(contract.transfer_to_owner(tokens, memo.clone()));
+
+        assert_eq!(receipts.len(), 2, "{}", caller);
+        assert_eq!(receipts[0].receiver_id.as_str(), "intents.near");
+        let [
+            MockAction::FunctionCallWeight {
+                method_name,
+                args,
+                attached_deposit,
+                prepaid_gas,
+                gas_weight,
+                ..
+            },
+        ] = &receipts[0].actions[..]
+        else {
+            panic!("unexpected actions: {:?}", receipts[0].actions);
+        };
+        assert_eq!(method_name, b"mt_batch_transfer");
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(args).unwrap(),
+            serde_json::json!({
+                "receiver_id": owner(),
+                "token_ids": [
+                    "nep141:usdt.tether-token.near",
+                    "nep141:wrap.near",
+                    "nep245:v2_1.omni.hot.tg:1100_111",
+                ],
+                "amounts": ["7", "5", "9"],
+                "memo": memo,
+            })
+        );
+        assert_eq!(*attached_deposit, NearToken::from_yoctonear(1));
+        assert_eq!(*prepaid_gas, crate::mt_batch_transfer_min_gas(3));
+        assert_eq!(gas_weight.0, GasWeight(1).0);
+
+        assert_eq!(receipts[1].receiver_id, near_sdk::env::current_account_id());
+        let [
+            MockAction::FunctionCallWeight {
+                method_name,
+                prepaid_gas,
+                gas_weight,
+                ..
+            },
+        ] = &receipts[1].actions[..]
+        else {
+            panic!("unexpected actions: {:?}", receipts[1].actions);
+        };
+        assert_eq!(method_name, b"transfer_to_owner_callback");
+        assert_eq!(*prepaid_gas, crate::CALLBACK_GAS);
+        assert_eq!(gas_weight.0, 0);
+    }
+}
+
+#[test]
+fn test_transfer_to_owner_rejects_a_stranger() {
+    let message = transfer_panic(stranger(), 1, Gas::from_tgas(150), tokens(1));
+    assert!(
+        message.contains("Unauthorized: only the owner or an agent can transfer to the owner"),
+        "{}",
+        message
+    );
+}
+
+#[test]
+fn test_transfer_to_owner_requires_one_yocto() {
+    for deposit in [0, 2] {
+        let message = transfer_panic(agent(), deposit, Gas::from_tgas(150), tokens(1));
+        assert!(
+            message.contains("Requires attached deposit of exactly 1 yoctoNEAR"),
+            "deposit {}: {}",
+            deposit,
+            message
+        );
+    }
+}
+
+// At most 10 tokens, the most the gas was measured for, and an empty batch moves nothing.
+#[test]
+fn test_transfer_to_owner_rejects_0_or_more_than_10_tokens() {
+    for n in [0, 11] {
+        let message = transfer_panic(agent(), 1, Gas::from_tgas(150), tokens(n));
+        assert!(
+            message.contains("tokens must have 1 to 10 entries"),
+            "{} tokens: {}",
+            n,
+            message
+        );
+    }
+}
+
+#[test]
+fn test_transfer_to_owner_rejects_a_zero_amount() {
+    let mut tokens = tokens(2);
+    tokens.insert("nep141:wrap.near".to_string(), U128(0));
+    let message = transfer_panic(agent(), 1, Gas::from_tgas(150), tokens);
+    assert!(
+        message.contains("Amount of nep141:wrap.near must be above 0"),
+        "{}",
+        message
+    );
+}
+
+// The gas needed grows with the token count: 38 Tgas for 10 tokens.
+#[test]
+fn test_transfer_to_owner_requires_its_gas() {
+    let needed = crate::gas_for_transfer_to_owner(10);
+    let message = transfer_panic(
+        agent(),
+        1,
+        needed.saturating_sub(Gas::from_gas(1)),
+        tokens(10),
+    );
+    assert!(
+        message.contains("Not enough gas attached. Please attach at least 38 TGas"),
+        "{}",
+        message
+    );
+}
+
+#[test]
+#[should_panic(expected = "transfer_to_owner: mt_batch_transfer on intents.near failed")]
+fn test_transfer_to_owner_callback_fails_when_the_transfer_failed() {
+    let contract = trading_account_with_agent();
+    testing_env!(
+        get_context(accounts(0)).build(),
+        near_sdk::test_vm_config(),
+        near_sdk::RuntimeFeesConfig::test(),
+        Default::default(),
+        vec![near_sdk::PromiseResult::Failed],
+    );
+    contract.transfer_to_owner_callback();
 }

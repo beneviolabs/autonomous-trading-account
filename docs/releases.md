@@ -54,6 +54,10 @@ The trading account reports its version from `contract_version()`. The numbers a
 
 GitHub Releases are kept forever, unlike CI artifacts (90 days), so each release's wasm and hashes stay one click from its version. A version can't be released twice: a second Release for the same tag fails. Skipped version numbers are fine.
 
+### 1.0.0
+
+The first versioned release, and the first `upgrade` and `migrate`. Agents swap with `swap(quote_payload, quote_signature)`, which deposits into a 1Click quote with a direct `mt_transfer` call. The owner and agents can move up to 10 tokens from the trading account's intents balance to the owner's with `transfer_to_owner(tokens, memo)`. `request_signature`, the MPC signing path, `get_signer_id` and `set_signer_id` are gone, and migrating from v0 drops `signer_id` from the state.
+
 ## Which release do I need?
 
 | What changed | Procedure | Affects |
@@ -163,7 +167,7 @@ Use the Release's bs58 hash in the steps below.
       ```
    2. Create a new trading account ([lifecycle](trading-account.md#lifecycle) step 1).
    3. `near account view-account-summary $TA network-config testnet now` shows the new hash, in hex, under `Global Contract`.
-   4. Run through the rest of the [lifecycle](trading-account.md#lifecycle).
+   4. Run through the rest of the [lifecycle](trading-account.md#lifecycle). `swap` needs 1Click and `intents.near`, which are mainnet only, so check it on the dev factory (step 4).
    5. [Upgrade](trading-account.md#upgrading-a-trading-account) a trading account created before step 2, with agents added, and check it.
 
    If the rehearsal finds a problem, delete the GitHub Release (`gh release delete trading-account/v$VERSION`) but keep the tag, so the number isn't reused. Fix it and release the next version.
