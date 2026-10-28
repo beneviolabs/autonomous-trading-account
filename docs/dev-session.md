@@ -24,16 +24,16 @@ scripts/dev/session.sh <trading account>        # add testnet for a testnet acco
 ## What restore does
 
 `scripts/dev/restore.sh <snapshot>` sends one transaction, signed as the trading account:
-1. It deploys the restore helper, [`tools/restore-state`](../tools/restore-state), and calls its `restore`, which writes back every storage entry from the snapshot and removes the ones written since.
+1. It deploys the restore helper, [`scripts/dev/restore.wat`](../scripts/dev/restore.wat), a few hundred bytes of hand-written wasm,, and calls its `restore`, which writes back every storage entry from the snapshot and removes the ones written since.
 2. It puts back the snapshot's code: its global contract, or the wasm the snapshot saved.
 
 The actions share a receipt, so if any fails nothing changes, and the helper never stays on the account. Afterwards the script checks that storage and code match the snapshot. It reports keys and NEAR that differ, since those aren't contract state; send back any top-up yourself.
 
 ## Reset to v0
 
-`scripts/dev/reset-to-v0.sh <trading account>` puts an account back on the v0 global code (`6ziT…`) with v0 state, and removes any code of its own. Use it when the account doesn't start on a global, so a snapshot restore would only bring its own code back. It sends one transaction, signed as the trading account: deploy the restore helper, call its `reset_to_v0`, then switch to the v0 global. Afterwards it checks the owner, agents and signer read back on v0.
+`scripts/dev/reset-to-v0.sh <trading account>` puts an account back on the v0 global code (`6ziT…`) with v0 state, and removes any code of its own. Use it when the account doesn't start on a global, so a snapshot restore would only bring its own code back. It sends one transaction, signed as the trading account: deploy the restore helper, have it write the v0 `STATE`, then switch to the v0 global. Afterwards it checks the owner, agents and signer read back on v0.
 
-The down migration lives only in the dev helper, never in the contract. It goes from state version 1 to v0. For a later state version, add its step down in `tools/restore-state` when you need it. To move a 1.0.0-or-later account to a release instead, the owner [upgrades](trading-account.md#upgrading-a-trading-account) it.
+The down migration lives only in `reset-to-v0.sh`, never in the contract. It goes from state version 1 to v0. For a later state version, add its step down there when you need it. To move a 1.0.0-or-later account to a release instead, the owner [upgrades](trading-account.md#upgrading-a-trading-account) it.
 
 ## The pieces on their own
 
