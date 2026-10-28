@@ -20,7 +20,7 @@ export VERSION=<new CONTRACT_VERSION>
 1. **Tag the release.** CI tests and builds the tagged commit, then publishes the GitHub Release with the wasm and its hashes.
    ```bash
    git switch main && git pull
-   git tag trading-account/v$VERSION
+   git tag -m "Trading account $VERSION" trading-account/v$VERSION
    git push origin trading-account/v$VERSION
    ```
    Wait until the Release exists:
