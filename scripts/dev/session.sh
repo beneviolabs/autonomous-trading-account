@@ -46,7 +46,7 @@ show_state() {
     echo "  version   $(view "$network" "$account" contract_version 2>/dev/null || echo v0)"
     echo "  code      $(view_account "$network" "$account" | jq -r '.global_contract_hash // .code_hash')"
     echo "  owner     $owner"
-    echo "  agents    $(view "$network" "$account" get_agents 2>/dev/null || view "$network" "$account" get_authorized_users)"
+    echo "  agents    $(agents_of "$network" "$account")"
     echo "  NEAR      $(view_account "$network" "$account" | jq -r '(.amount | tonumber) / 1e24')"
     local tokens
     tokens="$(view "$network" intents.near mt_tokens_for_owner "{\"account_id\":\"$account\"}" | jq -c '[.[].token_id]')"

@@ -1,17 +1,18 @@
-//! Dev tooling for scripts/dev/restore.sh. Never deployed for real use: restore.sh deploys it and
-//! replaces it in the same transaction.
-//!
-//! Writes raw storage entries back (and removes keys added since), so a trading account can return
-//! to a snapshot. Deploy it, call `restore`, and switch back to the snapshot's code in ONE
-//! transaction: the actions share a receipt, so if any fails nothing changes, and the helper never
+//! Dev tooling for scripts/dev/restore.sh and scripts/dev/reset-to-v0.sh. Never deployed for real
+//! use: each script deploys it, calls one method, and replaces it with the account's code in ONE
+//! transaction. The actions share a receipt, so if any fails nothing changes, and the helper never
 //! stays on the account.
+//!
+//! - `restore` writes raw storage entries back (and removes keys added since), so a trading account
+//!   can return to a snapshot.
+//! - `reset_to_v0` rewrites v1 state into v0's layout.
 use near_sdk::base64::{Engine, engine::general_purpose::STANDARD};
 use near_sdk::env;
 
 #[derive(near_sdk::serde::Deserialize)]
 #[serde(crate = "near_sdk::serde")]
 struct Args {
-    /// [key, value] pairs, both base64, as `near contract view-storage ... as-json` prints them.
+    /// [key, value] pairs, both base64, from a scripts/dev/snapshot.sh snapshot.
     entries: Vec<(String, String)>,
     /// Keys (base64) written after the snapshot, e.g. an agent added since. Removed.
     #[serde(default)]

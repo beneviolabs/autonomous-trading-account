@@ -103,8 +103,21 @@ view() {
     local args="${4:-}" args_b64
     [ -n "$args" ] || args='{}'
     args_b64="$(printf '%s' "$args" | base64 | tr -d '\n')"
-    rpc_query "$1" "{\"request_type\":\"call_function\",\"finality\":\"final\",\"account_id\":\"$2\",\"method_name\":\"$3\",\"args_base64\":\"$args_b64\"}" \
-        | jq -c '.result | implode | fromjson'
+    local result
+    result="$(rpc_query "$1" "{\"request_type\":\"call_function\",\"finality\":\"final\",\"account_id\":\"$2\",\"method_name\":\"$3\",\"args_base64\":\"$args_b64\"}")" \
+        || return 1
+    # A call that fails in the contract comes back as a result with an error string.
+    if jq -e 'has("error")' <<<"$result" >/dev/null; then
+        echo "$2.$3: $(jq -r .error <<<"$result")" >&2
+        return 1
+    fi
+    jq -c '.result | implode | fromjson' <<<"$result"
+}
+
+# agents_of <network> <account>: a trading account's agents as a sorted JSON array. v0 calls them
+# authorized users.
+agents_of() {
+    { view "$1" "$2" get_agents 2>/dev/null || view "$1" "$2" get_authorized_users; } | jq -cS 'sort'
 }
 
 # view_account <network> <account>: code_hash, global_contract_hash and the rest.
@@ -230,6 +243,16 @@ fetch_ci_factory() {
         || die "run $run's log doesn't show the hash of the wasm it uploaded"
     FACTORY_BS58="$(hex_to_bs58 "$hex")"
     info "factory at ${commit:0:7} (run $run): $FACTORY_BS58 (checked)"
+}
+
+# --- Dev ------------------------------------------------------------------------------------
+
+# Builds tools/restore-state, the dev helper restore.sh and reset-to-v0.sh deploy for one
+# transaction. Sets RESTORE_HELPER to its wasm.
+build_restore_helper() {
+    (cd "$REPO_ROOT/tools/restore-state" && cargo near build non-reproducible-wasm --no-abi) >/dev/null 2>&1 \
+        || die "couldn't build tools/restore-state (run cargo near build non-reproducible-wasm in it to see why)"
+    RESTORE_HELPER="$REPO_ROOT/tools/restore-state/target/near/restore_state.wasm"
 }
 
 # --- Signing --------------------------------------------------------------------------------

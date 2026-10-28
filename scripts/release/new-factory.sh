@@ -12,7 +12,7 @@
 # - new() gets the owner, the network and the trading account version's global hash, which must
 #   already be deployed on that network. "v0" is the original code.
 # - Afterwards, a factory owned by a DAO should have no keys: the script offers to delete the one
-#   it created.
+#   it created. Decline to keep it, as the dev and testnet factories do.
 # shellcheck source=../lib.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/../lib.sh"
 
@@ -68,5 +68,6 @@ info "done: $factory runs $FACTORY_BS58, owned by $owner, pointing at $version"
 
 key="$(access_keys "$network" "$factory")"
 info "$factory has key $key. If its owner is a DAO, delete it so only the DAO controls the factory."
-run_tx near account delete-keys "$factory" public-keys "$key" network-config "$network" sign-with-keychain send
+run_tx near account delete-keys "$factory" public-keys "$key" network-config "$network" sign-with-keychain send \
+    || info "kept $key"
 info "Then point Peerfolio Backend at it: AUTH_CREATOR and VITE_AUTH_CREATOR_* (local .env, Render, Cloudflare)."

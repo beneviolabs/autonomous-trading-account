@@ -26,6 +26,7 @@ while [ $# -gt 0 ]; do
     shift
 done
 [ "${#args[@]}" = 2 ] || usage
+[ "$print_only" = 1 ] || [ -n "$council" ] || die "--as <council account> is required to submit (or --print-only)"
 
 case "${args[0]}" in
     pointer)
@@ -62,7 +63,6 @@ Description:  $description
 EOF
 [ "$print_only" = 1 ] && exit 0
 
-[ -n "$council" ] || die "--as <council account> is required to submit"
 signing_args "$hd_path" ""
 proposal="$(jq -cn --arg d "$description" --argjson k "$kind" '{proposal: {description: $d, kind: $k}}')"
 next_id="$(view mainnet "$DAO" get_last_proposal_id)"

@@ -23,20 +23,17 @@ done
 account="${args[0]}" network="${args[1]:-mainnet}"
 global_deployer "$network" >/dev/null
 
-# Owner and agents, read before and after. v0 calls its agents authorized users.
+# Owner and agents, read before and after.
 read_state() {
-    local agents
-    agents="$(view "$network" "$account" get_agents 2>/dev/null)" \
-        || agents="$(view "$network" "$account" get_authorized_users)"
     echo "owner $(view "$network" "$account" get_owner_id)"
-    echo "agents $(jq -cS 'sort' <<<"$agents")"
+    echo "agents $(agents_of "$network" "$account")"
 }
 before="$(read_state)" || die "couldn't read $account's owner and agents on $network"
 
-build_log="$(mktemp)"
-env -u ONE_CLICK_TEST_KEY "$REPO_ROOT/scripts/build-wasm.sh" "$REPO_ROOT/contracts/trading-account" >"$build_log" 2>&1 \
-    || { tail -20 "$build_log" >&2; die "build failed"; }
-rm -f "$build_log"
+info "building the trading account"
+work_dir
+env -u ONE_CLICK_TEST_KEY "$REPO_ROOT/scripts/build-wasm.sh" "$REPO_ROOT/contracts/trading-account" >"$WORK_DIR/build.log" 2>&1 \
+    || { tail -20 "$WORK_DIR/build.log" >&2; die "build failed"; }
 wasm="$REPO_ROOT/contracts/target/near/trading_account/trading_account.wasm"
 if LC_ALL=C grep -aqF "$ONE_CLICK_TEST_PUBLIC_KEY" "$wasm"; then
     die "$wasm trusts the sandbox tests' quote key. Not deploying it."

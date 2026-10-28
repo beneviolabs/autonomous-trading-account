@@ -14,6 +14,7 @@ account="$1" network="${2:-mainnet}"
 global_deployer "$network" >/dev/null
 
 view="$(view_account "$network" "$account")" || die "$account doesn't exist on $network"
+storage="$(view_state "$network" "$account")"
 global="$(jq -r '.global_contract_hash // empty' <<<"$view")"
 if [ -n "$global" ]; then
     code="$(jq -cn --arg h "$global" '{global_contract_hash: $h}')"
@@ -25,8 +26,8 @@ fi
 jq -n \
     --arg account "$account" --arg network "$network" --arg taken_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --argjson code "$code" \
-    --argjson storage "$(view_state "$network" "$account")" \
+    --argjson storage "$storage" \
     --argjson keys "$(access_keys "$network" "$account" | jq -R . | jq -sc 'sort')" \
     --arg balance "$(jq -r .amount <<<"$view")" \
     '{account: $account, network: $network, taken_at: $taken_at, code: $code, storage: $storage, keys: $keys, balance: $balance}'
-info "snapshot of $account: $(jq -r 'if .global_contract_hash then "global " + .global_contract_hash else "local code " + .code_hash end' <<<"$code"), $(view_state "$network" "$account" | jq length) storage entries"
+info "snapshot of $account: $(jq -r 'if .global_contract_hash then "global " + .global_contract_hash else "local code " + .code_hash end' <<<"$code"), $(jq length <<<"$storage") storage entries"

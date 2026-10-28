@@ -26,9 +26,7 @@ snapshot="${args[0]}"
 [ -f "$snapshot" ] || die "no snapshot at $snapshot"
 account="$(jq -r .account "$snapshot")" network="$(jq -r .network "$snapshot")"
 
-(cd "$REPO_ROOT/tools/restore-state" && cargo near build non-reproducible-wasm --no-abi) >/dev/null 2>&1 \
-    || die "couldn't build tools/restore-state (run cargo near build non-reproducible-wasm in it to see why)"
-helper="$REPO_ROOT/tools/restore-state/target/near/restore_state.wasm"
+build_restore_helper
 
 global="$(jq -r '.code.global_contract_hash // empty' "$snapshot")"
 if [ -n "$global" ]; then
@@ -48,7 +46,7 @@ restore_args="$(jq -c --argjson now "$now" \
 info "restoring $account to $(jq -r .taken_at "$snapshot"): writes $(jq '.entries | length' <<<"$restore_args") entries, removes $(jq '.remove | length' <<<"$restore_args"), code back to $code_label"
 
 run_tx near transaction construct-transaction "$account" "$account" \
-    add-action deploy-contract use-file "$helper" with-init-call restore \
+    add-action deploy-contract use-file "$RESTORE_HELPER" with-init-call restore \
     json-args "$restore_args" prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' \
     add-action "${code_back[@]}" \
     skip network-config "$network" sign-with-keychain send

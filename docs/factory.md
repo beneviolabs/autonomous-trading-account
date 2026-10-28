@@ -28,7 +28,7 @@ Use this only for a new factory account, for example when the factory's stored s
 
 1. It creates the factory account from its parent account (`auth.peerfolio.near` from `peerfolio.near`) with 4 NEAR, and saves the new account's key to the keychain.
 2. It deploys the factory wasm from the given commit's CI run, and calls `new` with the owner, the network and the trading account version's global hash.
-3. It checks the code hash, owner and pointer, then offers to delete the key it created. A factory owned by the DAO should have no keys.
+3. It checks the code hash, owner and pointer, then offers to delete the key it created. A factory owned by the DAO should have no keys; decline for a dev or testnet factory, which keeps its key.
 
 ```bash
 scripts/release/new-factory.sh testnet auth.peerfolio.testnet peerfolio.peerfolio.testnet <version> <commit>
