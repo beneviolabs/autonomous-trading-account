@@ -936,6 +936,43 @@ async fn test_swap_calls_intents_as_the_trading_account() -> Result<()> {
     Ok(())
 }
 
+/// Swaps intents.near's code for a contract with no methods, so every call to it fails.
+async fn break_intents(worker: &Worker<Sandbox>, intents: &Contract) -> Result<()> {
+    let code = wat::parse_str(r#"(module (memory (export "memory") 1))"#)?;
+    worker.patch(intents.id()).code(&code).transact().await?;
+    Ok(())
+}
+
+// A failed mt_transfer reaches swap_callback through the promise chain and fails the caller's
+// transaction, so the bot can't mistake it for a swap.
+#[tokio::test]
+async fn test_swap_fails_when_mt_transfer_fails() -> Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let SwapAccounts {
+        trading_account,
+        intents,
+        agent,
+        ..
+    } = deploy_for_swap(&worker).await?;
+    break_intents(&worker, &intents).await?;
+
+    let outcome = swap(
+        &agent,
+        &trading_account,
+        &test_quote(json!({})),
+        Gas::from_tgas(100),
+    )
+    .await?;
+    assert!(outcome.is_failure(), "{:?}", outcome);
+    let failures = format!("{:?}", outcome.failures());
+    assert!(
+        failures.contains("swap: mt_transfer on intents.near failed"),
+        "{}",
+        failures
+    );
+    Ok(())
+}
+
 // The deadline is checked against the block time.
 #[tokio::test]
 async fn test_swap_rejects_an_expired_quote() -> Result<()> {
@@ -1008,6 +1045,36 @@ fn transfer_tokens(n: usize) -> serde_json::Value {
         })
         .collect::<serde_json::Map<_, _>>()
         .into()
+}
+
+// A failed mt_batch_transfer reaches transfer_to_owner_callback through the promise chain and
+// fails the caller's transaction.
+#[tokio::test]
+async fn test_transfer_to_owner_fails_when_mt_batch_transfer_fails() -> Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let SwapAccounts {
+        trading_account,
+        intents,
+        agent,
+        ..
+    } = deploy_for_swap(&worker).await?;
+    break_intents(&worker, &intents).await?;
+
+    let outcome = transfer_to_owner(
+        &agent,
+        &trading_account,
+        transfer_tokens(1),
+        Gas::from_tgas(100),
+    )
+    .await?;
+    assert!(outcome.is_failure(), "{:?}", outcome);
+    let failures = format!("{:?}", outcome.failures());
+    assert!(
+        failures.contains("transfer_to_owner: mt_batch_transfer on intents.near failed"),
+        "{}",
+        failures
+    );
+    Ok(())
 }
 
 // transfer_to_owner's batch reaches intents.near from the trading account itself, with the 1 yocto,
